@@ -179,6 +179,11 @@ export const ASActivityHistoryView: React.FC<ASActivityHistoryViewProps> = ({
                           <span>{post.authorHandle}</span>
                           <ExternalLink className="w-3 h-3 shrink-0" />
                         </a>
+                        {(post.xPostId.startsWith('sim-') || post.id.startsWith('post-x-201')) && (
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                            DEMO DATA
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center gap-2 text-[11px] text-slate-500">
                         <span>{new Date(post.detectedAt || post.createdAt).toLocaleString()}</span>

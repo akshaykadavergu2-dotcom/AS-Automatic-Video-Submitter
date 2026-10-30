@@ -18,6 +18,7 @@ import {
   Power,
   ChevronRight,
   Info,
+  X,
 } from 'lucide-react';
 import { CloudWorkerState, AutomationConfig } from '../types/news';
 
@@ -57,10 +58,27 @@ export const ASAutomationView: React.FC<ASAutomationViewProps> = ({
   const [autoGovOnly, setAutoGovOnly] = useState(config?.autoPublishOnlyVerifiedGov ?? false);
   const [isSavingConfig, setIsSavingConfig] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [startError, setStartError] = useState<string | null>(null);
+
+  const handleStartWithValidation = async () => {
+    setStartError(null);
+    try {
+      await onStartWorker();
+    } catch (err: any) {
+      setStartError(err.message || 'Failed to start cloud automation');
+    }
+  };
 
   const handleSaveSettings = async () => {
     if (!config) return;
+    if (pollInterval < 1) {
+      setSaveError('Polling cadence must be at least 1 minute.');
+      return;
+    }
     setIsSavingConfig(true);
+    setSaveError(null);
+    setSaveSuccess(false);
     try {
       await onUpdateConfig({
         ...config,
@@ -73,7 +91,7 @@ export const ASAutomationView: React.FC<ASAutomationViewProps> = ({
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
     } catch (err: any) {
-      alert(err.message || 'Failed to save settings');
+      setSaveError(err.message || 'Failed to save pipeline configuration');
     } finally {
       setIsSavingConfig(false);
     }
@@ -127,6 +145,21 @@ export const ASAutomationView: React.FC<ASAutomationViewProps> = ({
         </div>
       </div>
 
+      {startError && (
+        <div className="p-3.5 rounded-xl bg-red-950/70 border border-red-800 text-red-200 text-xs flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+            <div>
+              <p className="font-bold">Cannot Start Cloud Automation</p>
+              <p className="text-[11px] text-red-300 mt-0.5">{startError}</p>
+            </div>
+          </div>
+          <button onClick={() => setStartError(null)} className="text-slate-400 hover:text-white">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Central Start / Stop Command Console */}
       <div className="bg-[#0b0f1a] rounded-2xl border border-slate-800 p-6 space-y-6">
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 pb-6 border-b border-slate-800/80">
@@ -163,7 +196,7 @@ export const ASAutomationView: React.FC<ASAutomationViewProps> = ({
               </button>
             ) : (
               <button
-                onClick={onStartWorker}
+                onClick={handleStartWithValidation}
                 disabled={isWorkerActionLoading || isStarting}
                 className="w-full sm:w-auto px-8 py-3.5 rounded-xl font-bold text-sm bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-500 text-white shadow-lg shadow-emerald-950/60 transition-all transform active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2.5 cursor-pointer"
               >
@@ -214,7 +247,7 @@ export const ASAutomationView: React.FC<ASAutomationViewProps> = ({
               <span>Completed Videos</span>
             </div>
             <p className="text-base font-bold text-white font-mono tabular-nums">
-              {cloudWorkerState?.metrics?.completedVideos ?? 4}
+              {cloudWorkerState?.metrics?.completedVideos ?? 0}
             </p>
             <p className="text-[11px] text-slate-500">Rendered via FFmpeg</p>
           </div>
@@ -225,7 +258,7 @@ export const ASAutomationView: React.FC<ASAutomationViewProps> = ({
               <span>Facebook Broadcasts</span>
             </div>
             <p className="text-base font-bold text-white font-mono tabular-nums">
-              {cloudWorkerState?.metrics?.facebookPublished ?? 2}
+              {cloudWorkerState?.metrics?.facebookPublished ?? 0}
             </p>
             <p className="text-[11px] text-slate-500">Published to Page</p>
           </div>
@@ -387,6 +420,11 @@ export const ASAutomationView: React.FC<ASAutomationViewProps> = ({
           {saveSuccess && (
             <span className="text-xs font-semibold text-emerald-400 flex items-center gap-1">
               <CheckCircle2 className="w-3.5 h-3.5" /> Settings saved successfully
+            </span>
+          )}
+          {saveError && (
+            <span className="text-xs font-semibold text-red-400 flex items-center gap-1">
+              <AlertTriangle className="w-3.5 h-3.5" /> {saveError}
             </span>
           )}
           <button

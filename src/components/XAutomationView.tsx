@@ -216,18 +216,6 @@ export const XAutomationView: React.FC<XAutomationViewProps> = ({
     }
   };
 
-  // Demo connection for bureau testing
-  const handleConnectDemo = async () => {
-    try {
-      await api.connectXDemoAuth('PrajaSanketamNews');
-      setActionNotice('Connected as @PrajaSanketamNews (Digital Bureau)');
-      loadModuleData();
-      setTimeout(() => setActionNotice(null), 4000);
-    } catch (e: any) {
-      alert(e.message);
-    }
-  };
-
   const handleDisconnectX = async () => {
     if (confirm('X ఖాతాను డిస్‌కనెక్ట్ చేయాలా? (Disconnect X account?)')) {
       await api.disconnectXAuth();

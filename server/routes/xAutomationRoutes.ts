@@ -30,11 +30,16 @@ const OAUTH_FILE = path.join(DATA_DIR, 'connected_accounts.json');
 
 interface XOAuthSession {
   isConnected: boolean;
+  id?: string;
   username?: string;
   name?: string;
   profileImageUrl?: string;
+  followersCount?: number;
+  followingCount?: number;
+  tokenExpiresAt?: number;
   connectedAt?: string;
   accessToken?: string;
+  refreshToken?: string;
   codeVerifier?: string;
 }
 
@@ -108,41 +113,61 @@ xAutomationRouter.get('/auth/url', (req, res) => {
   }
 });
 
+// X OAuth Status
 xAutomationRouter.get('/auth/status', (req, res) => {
   const session = getOAuthSession();
   const settings = getSettings();
+  const clientIdConfigured = Boolean(
+    settings.xConfig.apiKey || process.env.X_CLIENT_ID
+  );
   const bearerTokenConfigured = Boolean(
     settings.xConfig.bearerToken || process.env.X_BEARER_TOKEN
   );
 
+  const isTokenExpired = session.tokenExpiresAt ? Date.now() > session.tokenExpiresAt : false;
+  const isReallyConnected = Boolean(session.isConnected && session.username && !isTokenExpired);
+
   return res.json({
-    isConnected: session.isConnected,
-    username: session.username || null,
-    name: session.name || null,
-    profileImageUrl: session.profileImageUrl || null,
-    connectedAt: session.connectedAt || null,
+    isConnected: isReallyConnected,
+    isConfigured: clientIdConfigured || bearerTokenConfigured,
+    status: isReallyConnected
+      ? 'TOKEN ACTIVE (VERIFIED)'
+      : isTokenExpired
+      ? 'TOKEN EXPIRED'
+      : 'NOT CONFIGURED',
+    username: isReallyConnected ? session.username : null,
+    name: isReallyConnected ? session.name : null,
+    profileImageUrl: isReallyConnected ? session.profileImageUrl : null,
+    followersCount: isReallyConnected ? session.followersCount : null,
+    followingCount: isReallyConnected ? session.followingCount : null,
+    connectedAt: isReallyConnected ? session.connectedAt : null,
+    clientIdConfigured,
     bearerTokenConfigured,
   });
 });
 
+// Real X Account Disconnect and Token Revocation
 xAutomationRouter.post('/auth/disconnect', (req, res) => {
-  saveOAuthSession({ isConnected: false });
-  addAutomationLog('info', 'system', 'X/Twitter account disconnected by user.');
-  return res.json({ success: true, message: 'X account disconnected.' });
-});
+  const session = getOAuthSession();
+  if (session.accessToken) {
+    try {
+      const settings = getSettings();
+      const clientId = settings.xConfig.apiKey || process.env.X_CLIENT_ID || 'M29sSkh5dkhuOU1qS3c4bU8yV1E6MTpjaQ';
+      fetch('https://api.twitter.com/2/oauth2/revoke', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          token: session.accessToken,
+          token_type_hint: 'access_token',
+          client_id: clientId,
+        }).toString(),
+      }).catch(() => {});
+    } catch (_) {}
+  }
 
-xAutomationRouter.post('/auth/connect-demo', (req, res) => {
-  const { username } = req.body;
-  const session: XOAuthSession = {
-    isConnected: true,
-    username: username || 'PrajaSanketamNews',
-    name: 'Praja Sanketam Digital Bureau',
-    profileImageUrl: 'https://abs.twimg.com/sticky/default_profile_images/default_profile_400x400.png',
-    connectedAt: new Date().toISOString(),
-  };
-  saveOAuthSession(session);
-  addAutomationLog('success', 'system', `X account @${session.username} connected via OAuth.`);
-  return res.json({ success: true, session });
+  saveOAuthSession({ isConnected: false });
+  addAutomationLog('info', 'system', 'X/Twitter account disconnected and session cleared by user.');
+  return res.json({ success: true, message: 'X account disconnected.' });
 });
 
 // ==========================================

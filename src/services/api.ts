@@ -94,18 +94,55 @@ export const api = {
     return res.json();
   },
 
-  // Facebook Publishing
+  // Facebook Publishing & Account Verification
   async getFacebookStatus(): Promise<{
     connected: boolean;
     isConfigured: boolean;
+    status: string;
     pageId?: string;
     pageName?: string;
+    category?: string;
     fanCount?: number;
     notice?: string;
     error?: string;
   }> {
     const res = await fetch('/api/facebook/status');
     if (!res.ok) throw new Error('Failed to fetch Facebook status');
+    return res.json();
+  },
+
+  async getFacebookAuthUrl(): Promise<{ isConfigured: boolean; url: string | null; redirectUri: string; notice?: string }> {
+    const res = await fetch('/api/facebook/auth/url');
+    if (!res.ok) throw new Error('Failed to get Facebook OAuth URL');
+    return res.json();
+  },
+
+  async getFacebookPages(): Promise<{ success: boolean; pages: any[] }> {
+    const res = await fetch('/api/facebook/pages');
+    if (!res.ok) throw new Error('Failed to get Facebook pages');
+    return res.json();
+  },
+
+  async verifyFacebookPage(params: {
+    pageId: string;
+    pageAccessToken: string;
+    pageName?: string;
+  }): Promise<{ success: boolean; message: string; page: any }> {
+    const res = await fetch('/api/facebook/verify-page', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || 'Failed to verify Facebook Page credentials with Meta Graph API');
+    }
+    return data;
+  },
+
+  async disconnectFacebook(): Promise<{ success: boolean; message: string }> {
+    const res = await fetch('/api/facebook/disconnect', { method: 'POST' });
+    if (!res.ok) throw new Error('Failed to disconnect Facebook Page');
     return res.json();
   },
 
@@ -140,8 +177,9 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(settings),
     });
-    if (!res.ok) throw new Error('Failed to save settings');
-    return res.json();
+    const data = await res.json();
+    if (!res.ok || !data.success) throw new Error(data.error || 'Failed to save settings');
+    return data;
   },
 
   async uploadBrandAsset(
@@ -168,10 +206,15 @@ export const api = {
 
   async getXAuthStatus(): Promise<{
     isConnected: boolean;
+    isConfigured: boolean;
+    status: string;
     username: string | null;
     name: string | null;
     profileImageUrl: string | null;
+    followersCount?: number | null;
+    followingCount?: number | null;
     connectedAt: string | null;
+    clientIdConfigured: boolean;
     bearerTokenConfigured: boolean;
   }> {
     const res = await fetch('/api/x-automation/auth/status');
@@ -179,18 +222,18 @@ export const api = {
     return res.json();
   },
 
-  async disconnectXAuth(): Promise<{ success: boolean }> {
+  async disconnectXAuth(): Promise<{ success: boolean; message: string }> {
     const res = await fetch('/api/x-automation/auth/disconnect', { method: 'POST' });
     if (!res.ok) throw new Error('Failed to disconnect X account');
     return res.json();
   },
 
-  async connectXDemoAuth(username?: string): Promise<any> {
-    const res = await fetch('/api/x-automation/auth/connect-demo', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username }),
-    });
+  async getCloudWorkerReadiness(): Promise<{
+    success: boolean;
+    readiness: { isReady: boolean; errors: string[]; warnings: string[] };
+  }> {
+    const res = await fetch('/api/cloud-worker/validate');
+    if (!res.ok) throw new Error('Failed to validate cloud worker readiness');
     return res.json();
   },
 

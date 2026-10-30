@@ -4,10 +4,21 @@ import {
   startCloudWorker,
   stopCloudWorker,
   executeCloudWorkerCycle,
+  validateAutomationReadiness,
 } from '../cloudWorkerService.js';
 import { getAutomationLogs } from '../xAutomationService.js';
 
 export const cloudWorkerRouter = Router();
+
+// Validate readiness before starting
+cloudWorkerRouter.get('/validate', (req, res) => {
+  try {
+    const readiness = validateAutomationReadiness();
+    return res.json({ success: true, readiness });
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message });
+  }
+});
 
 // Get live cloud worker status, metrics, and timestamps
 cloudWorkerRouter.get('/status', (req, res) => {
@@ -25,7 +36,7 @@ cloudWorkerRouter.get('/status', (req, res) => {
   }
 });
 
-// START Cloud Worker (Persists RUNNING state and activates server daemon)
+// START Cloud Worker (Validates all required configurations before activation)
 cloudWorkerRouter.post('/start', async (req, res) => {
   try {
     const updatedState = await startCloudWorker();
@@ -35,7 +46,7 @@ cloudWorkerRouter.post('/start', async (req, res) => {
       message: 'Cloud Background Worker activated successfully. Monitoring runs 24/7 independently of browser.',
     });
   } catch (e: any) {
-    return res.status(500).json({ error: e.message });
+    return res.status(400).json({ success: false, error: e.message });
   }
 });
 

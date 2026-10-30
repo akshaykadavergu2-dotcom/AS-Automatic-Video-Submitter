@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Share2,
   Users,
@@ -16,8 +16,11 @@ import {
   Globe,
   Sliders,
   AlertCircle,
+  Key,
+  Info,
 } from 'lucide-react';
 import { MonitoredSource, NewsCategory } from '../types/news';
+import { api } from '../services/api';
 
 interface ASConnectionsViewProps {
   language: 'te' | 'en';
@@ -38,46 +41,215 @@ export const ASConnectionsView: React.FC<ASConnectionsViewProps> = ({
   onSyncFollowing,
   isSyncingFollowing,
 }) => {
-  // Mock/Configured Connection States
-  const [isXConnected, setIsXConnected] = useState(true);
-  const [xAccount, setXAccount] = useState({
-    handle: '@PrajaSanketam_Live',
-    name: 'Praja Sanketam Live Network',
-    avatar: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=120&auto=format&fit=crop&q=80',
-    followingCount: 148,
-    lastSync: '12 minutes ago',
+  // Real Connection States (loaded from backend)
+  const [xAuthStatus, setXAuthStatus] = useState<{
+    isConnected: boolean;
+    isConfigured: boolean;
+    status: string;
+    username: string | null;
+    name: string | null;
+    profileImageUrl: string | null;
+    followersCount?: number | null;
+    followingCount?: number | null;
+    connectedAt: string | null;
+    clientIdConfigured: boolean;
+    bearerTokenConfigured: boolean;
+  }>({
+    isConnected: false,
+    isConfigured: false,
+    status: 'NOT CONFIGURED',
+    username: null,
+    name: null,
+    profileImageUrl: null,
+    connectedAt: null,
+    clientIdConfigured: false,
+    bearerTokenConfigured: false,
   });
 
-  const [isFacebookConnected, setIsFacebookConnected] = useState(true);
-  const [selectedPageId, setSelectedPageId] = useState('page_982341908');
-  const facebookPages = [
-    {
-      id: 'page_982341908',
-      name: 'Praja Sanketam Official (ప్రజా సంకేతం)',
-      category: 'Media / News Company',
-      likes: '84,200 followers',
-      tokenStatus: 'Valid (Page Token Granted)',
-    },
-    {
-      id: 'page_445129031',
-      name: 'Praja Sanketam Telangana Express',
-      category: 'Broadcasting & Media Production',
-      likes: '22,400 followers',
-      tokenStatus: 'Valid (Page Token Granted)',
-    },
-  ];
+  const [facebookStatus, setFacebookStatus] = useState<{
+    connected: boolean;
+    isConfigured: boolean;
+    status: string;
+    pageId?: string;
+    pageName?: string;
+    category?: string;
+    fanCount?: number;
+    notice?: string;
+    error?: string;
+  }>({
+    connected: false,
+    isConfigured: false,
+    status: 'NOT CONFIGURED',
+  });
 
-  // Tab inside X card: Selected Accounts vs Accounts You Follow
+  const [facebookPages, setFacebookPages] = useState<any[]>([]);
+
+  // Manual Page Connection Form (Direct Page Token)
+  const [manualPageId, setManualPageId] = useState('');
+  const [manualPageToken, setManualPageToken] = useState('');
+  const [manualPageName, setManualPageName] = useState('');
+  const [isVerifyingPage, setIsVerifyingPage] = useState(false);
+  const [pageVerifyError, setPageVerifyError] = useState<string | null>(null);
+
+  // General state
+  const [isLoadingStatus, setIsLoadingStatus] = useState(true);
+  const [notificationMsg, setNotificationMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  // Tab inside X card: Selected Accounts vs Accounts You Follow vs Excluded
   const [xSubTab, setXSubTab] = useState<'selected' | 'following' | 'exclusions'>('selected');
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Form states
+  // Form states for adding manual sources
   const [newHandle, setNewHandle] = useState('');
   const [newName, setNewName] = useState('');
   const [newCategory, setNewCategory] = useState<NewsCategory>('Telangana');
   const [isSubmittingSource, setIsSubmittingSource] = useState(false);
-  const [notificationMsg, setNotificationMsg] = useState<string | null>(null);
 
+  // Load real connection statuses from backend API
+  const refreshStatuses = async () => {
+    setIsLoadingStatus(true);
+    try {
+      const [xRes, fbRes, pagesRes] = await Promise.allSettled([
+        api.getXAuthStatus(),
+        api.getFacebookStatus(),
+        api.getFacebookPages(),
+      ]);
+
+      if (xRes.status === 'fulfilled') {
+        setXAuthStatus(xRes.value);
+      }
+      if (fbRes.status === 'fulfilled') {
+        setFacebookStatus(fbRes.value);
+        if (fbRes.value.pageId) {
+          setManualPageId(fbRes.value.pageId);
+        }
+      }
+      if (pagesRes.status === 'fulfilled') {
+        setFacebookPages(pagesRes.value.pages || []);
+      }
+    } catch (e) {
+      console.error('Failed to load connection status:', e);
+    } finally {
+      setIsLoadingStatus(false);
+    }
+  };
+
+  useEffect(() => {
+    refreshStatuses();
+
+    // Listen for OAuth popup completion
+    const handleOAuthMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
+        setNotificationMsg({
+          text: `Successfully authenticated ${event.data.service === 'x' ? 'X account' : 'Facebook Page'}!`,
+          type: 'success',
+        });
+        refreshStatuses();
+      } else if (event.data?.type === 'OAUTH_AUTH_ERROR') {
+        setNotificationMsg({
+          text: `OAuth authorization failed: ${event.data.error || 'User denied request'}`,
+          type: 'error',
+        });
+      }
+    };
+
+    window.addEventListener('message', handleOAuthMessage);
+    return () => window.removeEventListener('message', handleOAuthMessage);
+  }, []);
+
+  // Connect X via OAuth
+  const handleConnectX = async () => {
+    try {
+      const res = await api.getXAuthUrl();
+      if (!res.clientIdConfigured && !res.url) {
+        alert('X Client ID is not configured. Go to Studio Settings to enter your X OAuth 2.0 Client ID.');
+        return;
+      }
+      const popup = window.open(res.url, 'x_oauth_popup', 'width=600,height=720');
+      if (!popup) {
+        alert('Please allow popups for this site to complete X authentication.');
+      }
+    } catch (e: any) {
+      alert(e.message || 'Failed to start X authorization flow');
+    }
+  };
+
+  // Disconnect X
+  const handleDisconnectX = async () => {
+    if (!confirm('Are you sure you want to disconnect your X account?')) return;
+    try {
+      await api.disconnectXAuth();
+      setNotificationMsg({ text: 'X account disconnected.', type: 'success' });
+      await refreshStatuses();
+    } catch (e: any) {
+      alert(e.message || 'Failed to disconnect X account');
+    }
+  };
+
+  // Connect Facebook via OAuth
+  const handleConnectFacebookOAuth = async () => {
+    try {
+      const res = await api.getFacebookAuthUrl();
+      if (!res.isConfigured || !res.url) {
+        setNotificationMsg({
+          text: res.notice || 'Meta App ID not configured. Please enter Page ID and Page Access Token below.',
+          type: 'error',
+        });
+        return;
+      }
+      const popup = window.open(res.url, 'fb_oauth_popup', 'width=620,height=750');
+      if (!popup) {
+        alert('Please allow popups for this site to complete Meta authentication.');
+      }
+    } catch (e: any) {
+      alert(e.message || 'Failed to start Facebook authorization flow');
+    }
+  };
+
+  // Verify and Connect Page with direct token
+  const handleVerifyDirectPage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!manualPageId.trim() || !manualPageToken.trim()) {
+      setPageVerifyError('Page ID and Page Access Token are both required.');
+      return;
+    }
+
+    setIsVerifyingPage(true);
+    setPageVerifyError(null);
+
+    try {
+      const res = await api.verifyFacebookPage({
+        pageId: manualPageId.trim(),
+        pageAccessToken: manualPageToken.trim(),
+        pageName: manualPageName.trim() || undefined,
+      });
+
+      setNotificationMsg({
+        text: `Facebook Page "${res.page.name}" verified and connected with Meta Graph API!`,
+        type: 'success',
+      });
+      setManualPageToken('');
+      await refreshStatuses();
+    } catch (err: any) {
+      setPageVerifyError(err.message || 'Meta Graph API token verification failed.');
+    } finally {
+      setIsVerifyingPage(false);
+    }
+  };
+
+  // Disconnect Facebook Page
+  const handleDisconnectFacebook = async () => {
+    if (!confirm('Are you sure you want to disconnect the Facebook Page?')) return;
+    try {
+      await api.disconnectFacebook();
+      setNotificationMsg({ text: 'Facebook Page disconnected.', type: 'success' });
+      await refreshStatuses();
+    } catch (e: any) {
+      alert(e.message || 'Failed to disconnect Facebook Page');
+    }
+  };
+
+  // Add Source
   const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newHandle.trim()) return;
@@ -86,8 +258,8 @@ export const ASConnectionsView: React.FC<ASConnectionsViewProps> = ({
       await onAddSource(newHandle.trim(), newName.trim() || newHandle.trim(), newCategory);
       setNewHandle('');
       setNewName('');
-      setNotificationMsg(`Source @${newHandle.replace(/^@/, '')} added successfully.`);
-      setTimeout(() => setNotificationMsg(null), 3000);
+      setNotificationMsg({ text: `Source @${newHandle.replace(/^@/, '')} added successfully.`, type: 'success' });
+      setTimeout(() => setNotificationMsg(null), 3500);
     } catch (err: any) {
       alert(err.message || 'Failed to add source');
     } finally {
@@ -126,15 +298,28 @@ export const ASConnectionsView: React.FC<ASConnectionsViewProps> = ({
         </h1>
         <p className="text-xs text-slate-400 mt-0.5">
           {language === 'te'
-            ? 'X (ట్విట్టర్) అధికారిక API మరియు మెటా ఫేస్‌బుక్ గ్రాఫ్ API ద్వారా సురక్షిత ఆథరైజేషన్.'
-            : 'Official OAuth 2.0 authorization for X timeline feeds and authorized Meta Facebook Page broadcasting.'}
+            ? 'అధికారిక X API v2 మరియు Meta Graph API ధృవీకరణ. అన్ని కనెక్షన్లు లైవ్ API ద్వారా ధృవీకరించబడతాయి.'
+            : 'Live external integrations with official X OAuth 2.0 and Meta Graph API. No simulated or mock connections.'}
         </p>
       </div>
 
       {notificationMsg && (
-        <div className="p-3 rounded-xl bg-cyan-950/70 border border-cyan-800/60 text-cyan-200 text-xs flex items-center justify-between">
-          <span>{notificationMsg}</span>
-          <button onClick={() => setNotificationMsg(null)} className="text-cyan-400 hover:text-white">
+        <div
+          className={`p-3.5 rounded-xl border text-xs flex items-center justify-between ${
+            notificationMsg.type === 'success'
+              ? 'bg-emerald-950/70 border-emerald-800 text-emerald-200'
+              : 'bg-red-950/70 border-red-800 text-red-200'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {notificationMsg.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+            ) : (
+              <AlertTriangle className="w-4 h-4 text-red-400" />
+            )}
+            <span>{notificationMsg.text}</span>
+          </div>
+          <button onClick={() => setNotificationMsg(null)} className="text-slate-400 hover:text-white">
             <X className="w-3.5 h-3.5" />
           </button>
         </div>
@@ -154,70 +339,88 @@ export const ASConnectionsView: React.FC<ASConnectionsViewProps> = ({
                 <div>
                   <h2 className="text-base font-bold text-white flex items-center gap-2">
                     <span>X (Twitter) Feed Engine</span>
-                    {isXConnected && (
+                  </h2>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    {xAuthStatus.isConnected ? (
                       <span className="text-[11px] font-semibold text-emerald-400 flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3" /> Connected
+                        <CheckCircle2 className="w-3 h-3" /> TOKEN ACTIVE (VERIFIED)
+                      </span>
+                    ) : (
+                      <span className="text-[11px] font-semibold text-amber-400 flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3" /> {xAuthStatus.status}
                       </span>
                     )}
-                  </h2>
-                  <p className="text-xs text-slate-400">Official API v2 OAuth 2.0 with PKCE</p>
+                  </div>
                 </div>
               </div>
 
-              {isXConnected ? (
+              {xAuthStatus.isConnected ? (
                 <button
-                  onClick={() => setIsXConnected(false)}
+                  onClick={handleDisconnectX}
                   className="text-xs text-slate-400 hover:text-red-400 py-1 px-2.5 rounded-lg border border-slate-800 hover:border-red-900/60 transition-colors cursor-pointer"
                 >
                   Disconnect
                 </button>
               ) : (
                 <button
-                  onClick={() => setIsXConnected(true)}
-                  className="text-xs font-semibold text-white bg-slate-800 hover:bg-slate-700 py-1.5 px-3 rounded-lg border border-slate-700 transition-colors cursor-pointer"
+                  onClick={handleConnectX}
+                  className="text-xs font-semibold text-white bg-slate-800 hover:bg-slate-700 py-1.5 px-3 rounded-lg border border-slate-700 transition-colors cursor-pointer flex items-center gap-1.5"
                 >
-                  Connect 𝕏
+                  <span>Connect with 𝕏</span>
+                  <ExternalLink className="w-3 h-3 text-cyan-400" />
                 </button>
               )}
             </div>
 
-            {/* Connected Account Profile Box */}
-            {isXConnected && (
+            {/* Connected Account Profile Box (Only displayed if verified) */}
+            {xAuthStatus.isConnected && xAuthStatus.username ? (
               <div className="p-3.5 rounded-xl bg-slate-900/70 border border-slate-800/80 flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-full bg-slate-800 border border-cyan-500/40 flex items-center justify-center text-cyan-400 font-bold text-xs">
-                    PS
-                  </div>
+                  {xAuthStatus.profileImageUrl ? (
+                    <img
+                      src={xAuthStatus.profileImageUrl}
+                      alt={xAuthStatus.name || xAuthStatus.username}
+                      className="w-9 h-9 rounded-full object-cover border border-cyan-500/40"
+                    />
+                  ) : (
+                    <div className="w-9 h-9 rounded-full bg-slate-800 border border-cyan-500/40 flex items-center justify-center text-cyan-400 font-bold text-xs">
+                      {xAuthStatus.username.substring(0, 2).toUpperCase()}
+                    </div>
+                  )}
                   <div>
-                    <p className="text-xs font-bold text-white">{xAccount.name}</p>
-                    <p className="text-[11px] text-cyan-400 font-mono">{xAccount.handle}</p>
+                    <p className="text-xs font-bold text-white">{xAuthStatus.name || `@${xAuthStatus.username}`}</p>
+                    <a
+                      href={`https://x.com/${xAuthStatus.username}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[11px] text-cyan-400 font-mono hover:underline flex items-center gap-1"
+                    >
+                      <span>@{xAuthStatus.username}</span>
+                      <ExternalLink className="w-2.5 h-2.5" />
+                    </a>
                   </div>
                 </div>
 
                 <div className="text-right">
                   <p className="text-xs font-semibold text-slate-200 tabular-nums">
-                    {xAccount.followingCount} Following
+                    {xAuthStatus.followingCount != null ? `${xAuthStatus.followingCount} Following` : 'Verified Access'}
                   </p>
-                  <p className="text-[10px] text-slate-500">Synced {xAccount.lastSync}</p>
+                  <p className="text-[10px] text-slate-500">
+                    Connected {xAuthStatus.connectedAt ? new Date(xAuthStatus.connectedAt).toLocaleDateString() : 'Active'}
+                  </p>
                 </div>
               </div>
-            )}
-
-            {/* Scopes & Permissions Notice */}
-            <div className="p-3 rounded-xl bg-[#090d16] border border-slate-800/60 text-[11px] text-slate-400 space-y-1">
-              <div className="flex items-center gap-1.5 font-semibold text-slate-300">
-                <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
-                <span>Granted Scopes</span>
+            ) : (
+              <div className="p-3.5 rounded-xl bg-amber-950/20 border border-amber-900/40 text-[11px] text-amber-300 space-y-1">
+                <div className="flex items-center gap-1.5 font-bold">
+                  <Info className="w-3.5 h-3.5 text-amber-400" />
+                  <span>X Account Not Connected</span>
+                </div>
+                <p className="text-slate-400">
+                  Connect your X account to automatically import and monitor accounts you follow, or add selected news accounts manually below.
+                </p>
               </div>
-              <p>
-                <code className="text-cyan-300 font-mono text-[10px]">tweet.read</code> ·{' '}
-                <code className="text-cyan-300 font-mono text-[10px]">users.read</code> ·{' '}
-                <code className="text-cyan-300 font-mono text-[10px]">follows.read</code>
-              </p>
-              <p className="text-[10px] text-slate-500">
-                Media retrieved only when usage rights permit. Excluded accounts are ignored during collection cycles.
-              </p>
-            </div>
+            )}
 
             {/* Sub-Tabs: Selected Accounts vs Accounts You Follow vs Excluded */}
             <div className="pt-2">
@@ -257,7 +460,13 @@ export const ASConnectionsView: React.FC<ASConnectionsViewProps> = ({
 
                 {xSubTab === 'following' && (
                   <button
-                    onClick={onSyncFollowing}
+                    onClick={async () => {
+                      if (!xAuthStatus.isConnected && !xAuthStatus.bearerTokenConfigured) {
+                        alert('X account connection is required to sync your following list. Please connect your X account with OAuth.');
+                        return;
+                      }
+                      await onSyncFollowing();
+                    }}
                     disabled={isSyncingFollowing}
                     className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 transition-colors disabled:opacity-50 cursor-pointer"
                   >
@@ -305,7 +514,11 @@ export const ASConnectionsView: React.FC<ASConnectionsViewProps> = ({
               {/* Source List Table */}
               <div className="mt-3 max-h-56 overflow-y-auto space-y-1.5 pr-1">
                 {filteredSources.length === 0 ? (
-                  <p className="text-xs text-slate-500 py-4 text-center">No accounts found in this list.</p>
+                  <p className="text-xs text-slate-500 py-4 text-center">
+                    {xSubTab === 'following' && !xAuthStatus.isConnected
+                      ? 'No following accounts synced yet. Connect your X account above to import followed handles.'
+                      : 'No accounts in this list.'}
+                  </p>
                 ) : (
                   filteredSources.map((s) => (
                     <div
@@ -314,11 +527,11 @@ export const ASConnectionsView: React.FC<ASConnectionsViewProps> = ({
                     >
                       <div className="flex items-center gap-2 min-w-0">
                         <div className="w-6 h-6 rounded-full bg-slate-800 flex items-center justify-center text-[10px] text-cyan-400 font-bold shrink-0">
-                          {s.handle.substring(1, 3).toUpperCase()}
+                          {s.handle.substring(0, 2).toUpperCase()}
                         </div>
                         <div className="truncate">
                           <p className="text-white font-medium truncate">{s.name}</p>
-                          <p className="text-[11px] text-slate-400 font-mono truncate">{s.handle}</p>
+                          <p className="text-[11px] text-slate-400 font-mono truncate">@{s.handle}</p>
                         </div>
                       </div>
 
@@ -367,53 +580,41 @@ export const ASConnectionsView: React.FC<ASConnectionsViewProps> = ({
                 <div>
                   <h2 className="text-base font-bold text-white flex items-center gap-2">
                     <span>Facebook Page Broadcasting</span>
-                    {isFacebookConnected && (
+                  </h2>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    {facebookStatus.connected ? (
                       <span className="text-[11px] font-semibold text-emerald-400 flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3" /> Connected
+                        <CheckCircle2 className="w-3 h-3" /> TOKEN ACTIVE (VERIFIED)
+                      </span>
+                    ) : (
+                      <span className="text-[11px] font-semibold text-amber-400 flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3" /> {facebookStatus.status}
                       </span>
                     )}
-                  </h2>
-                  <p className="text-xs text-slate-400">Official Meta Graph API v21.0</p>
+                  </div>
                 </div>
               </div>
 
-              {isFacebookConnected ? (
+              {facebookStatus.connected ? (
                 <button
-                  onClick={() => setIsFacebookConnected(false)}
+                  onClick={handleDisconnectFacebook}
                   className="text-xs text-slate-400 hover:text-red-400 py-1 px-2.5 rounded-lg border border-slate-800 hover:border-red-900/60 transition-colors cursor-pointer"
                 >
                   Disconnect
                 </button>
               ) : (
                 <button
-                  onClick={() => setIsFacebookConnected(true)}
-                  className="text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 py-1.5 px-3 rounded-lg border border-blue-500 transition-colors cursor-pointer"
+                  onClick={handleConnectFacebookOAuth}
+                  className="text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 py-1.5 px-3 rounded-lg border border-blue-500 transition-colors cursor-pointer flex items-center gap-1.5"
                 >
-                  Connect Meta
+                  <span>Connect Meta OAuth</span>
+                  <ExternalLink className="w-3 h-3" />
                 </button>
               )}
             </div>
 
-            {/* Target Facebook Page Selection Dropdown */}
-            <div className="space-y-2">
-              <label className="text-xs font-semibold text-slate-300 block">
-                Target Facebook Publishing Page
-              </label>
-              <select
-                value={selectedPageId}
-                onChange={(e) => setSelectedPageId(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-400"
-              >
-                {facebookPages.map((page) => (
-                  <option key={page.id} value={page.id}>
-                    {page.name} — ({page.likes})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Page Metadata Box */}
-            {isFacebookConnected && (
+            {/* Verified Page Display (Only if verified) */}
+            {facebookStatus.connected && facebookStatus.pageName ? (
               <div className="p-3.5 rounded-xl bg-slate-900/70 border border-slate-800/80 space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2.5">
@@ -421,52 +622,83 @@ export const ASConnectionsView: React.FC<ASConnectionsViewProps> = ({
                       FB
                     </div>
                     <div>
-                      <p className="text-xs font-bold text-white">
-                        {facebookPages.find((p) => p.id === selectedPageId)?.name}
-                      </p>
+                      <p className="text-xs font-bold text-white">{facebookStatus.pageName}</p>
                       <p className="text-[11px] text-slate-400">
-                        {facebookPages.find((p) => p.id === selectedPageId)?.category}
+                        {facebookStatus.category || 'Authorized Media Page'}
                       </p>
                     </div>
                   </div>
-                  <span className="text-[11px] text-emerald-400 font-medium">Token Active</span>
+                  <span className="text-[11px] text-emerald-400 font-mono">Verified Active</span>
                 </div>
 
                 <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1 border-t border-slate-800/60 font-mono">
-                  <span>Page ID: {selectedPageId}</span>
-                  <span className="text-slate-500">Expires: Never (System User)</span>
+                  <span>Page ID: {facebookStatus.pageId}</span>
+                  <span>{facebookStatus.fanCount ? `${facebookStatus.fanCount.toLocaleString()} followers` : 'Publishing Ready'}</span>
                 </div>
               </div>
+            ) : (
+              /* Direct Page Verification Form */
+              <form onSubmit={handleVerifyDirectPage} className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <Key className="w-3.5 h-3.5 text-blue-400" />
+                    <span>Connect Facebook Page (Page ID &amp; Token)</span>
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-mono">Meta Graph API v21.0</span>
+                </div>
+
+                <div className="space-y-2">
+                  <div>
+                    <label className="text-[11px] text-slate-400 block mb-0.5">Facebook Page ID</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 109283746591823"
+                      value={manualPageId}
+                      onChange={(e) => setManualPageId(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-blue-400"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] text-slate-400 block mb-0.5">
+                      Page Access Token (Requires publish_video, pages_manage_posts)
+                    </label>
+                    <input
+                      type="password"
+                      placeholder="EAA..."
+                      value={manualPageToken}
+                      onChange={(e) => setManualPageToken(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-blue-400"
+                    />
+                  </div>
+                </div>
+
+                {pageVerifyError && (
+                  <p className="text-[11px] text-red-400 font-medium">{pageVerifyError}</p>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={isVerifyingPage || !manualPageId.trim() || !manualPageToken.trim()}
+                  className="w-full py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  <RefreshCw className={`w-3 h-3 ${isVerifyingPage ? 'animate-spin' : ''}`} />
+                  <span>{isVerifyingPage ? 'Verifying with Meta...' : 'Verify & Connect Facebook Page'}</span>
+                </button>
+              </form>
             )}
 
-            {/* Meta Graph API Permissions Notice */}
-            <div className="p-3.5 rounded-xl bg-blue-950/30 border border-blue-900/40 text-[11px] text-blue-200/90 space-y-1.5">
+            {/* Meta Policy & Scope Notice */}
+            <div className="p-3.5 rounded-xl bg-blue-950/20 border border-blue-900/40 text-[11px] text-blue-200/90 space-y-1.5">
               <div className="flex items-center gap-1.5 font-semibold text-blue-300">
                 <ShieldCheck className="w-3.5 h-3.5 text-blue-400" />
                 <span>Meta Official Policy &amp; Permissions</span>
               </div>
               <p>
-                <strong>Authorized Facebook Pages only:</strong> In strict compliance with Meta Graph API Terms of Service, video publishing is authorized exclusively for Pages where you hold administrative/editor rights. Publishing directly to personal user profiles is prohibited by Meta.
+                <strong>Authorized Facebook Pages only:</strong> Under Meta Graph API policies, video publishing is permitted exclusively on Facebook Pages where you hold Content Creator or Admin tasks. Personal user profiles are not supported by the Meta API.
               </p>
               <div className="text-[10px] text-blue-300/80 font-mono pt-1">
                 Required permissions: <code>pages_manage_posts</code>, <code>pages_read_engagement</code>, <code>publish_video</code>
-              </div>
-            </div>
-
-            {/* Automated Publishing Defaults */}
-            <div className="p-3 rounded-xl bg-slate-900/50 border border-slate-800/60 space-y-2">
-              <p className="text-xs font-semibold text-slate-300">Publishing Defaults</p>
-              <div className="flex items-center justify-between text-xs text-slate-400">
-                <span>Video Aspect Ratio</span>
-                <span className="font-semibold text-slate-200">16:9 Landscape &amp; 9:16 Vertical</span>
-              </div>
-              <div className="flex items-center justify-between text-xs text-slate-400">
-                <span>Telugu Headline Overlay</span>
-                <span className="text-emerald-400 font-semibold">Enabled (FFmpeg)</span>
-              </div>
-              <div className="flex items-center justify-between text-xs text-slate-400">
-                <span>Hashtags &amp; Description</span>
-                <span className="text-cyan-400 font-semibold">Gemini AI Auto-Generated</span>
               </div>
             </div>
           </div>

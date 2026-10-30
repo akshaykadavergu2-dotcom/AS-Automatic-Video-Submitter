@@ -30,39 +30,332 @@ const publicAssetsDir = path.resolve(process.cwd(), 'public/assets');
 if (!fs.existsSync(publicAssetsDir)) fs.mkdirSync(publicAssetsDir, { recursive: true });
 app.use('/assets', express.static(publicAssetsDir));
 
-// OAuth 2.0 Popup Callback Handler (Complies with oauth-integration skill)
-app.get(['/auth/callback', '/auth/callback/'], (req, res) => {
-  res.send(`
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <title>Praja Sanketam - X OAuth Authorization</title>
-        <style>
-          body { font-family: sans-serif; background: #0b0f19; color: #fff; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-          .card { background: #111827; border: 1px solid #374151; padding: 24px; border-radius: 12px; text-align: center; max-width: 400px; }
-          h2 { color: #10b981; margin-top: 0; }
-        </style>
-      </head>
-      <body>
-        <div class="card">
-          <h2>✓ Authorization Successful</h2>
-          <p>Connecting to Praja Sanketam AI News Studio...</p>
-        </div>
-        <script>
-          try {
+// OAuth 2.0 Popup Callback Handlers
+app.get(['/auth/callback', '/auth/callback/'], async (req, res) => {
+  const { code, state, error, error_description } = req.query;
+
+  if (error) {
+    const safeError = String(error_description || error).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return res.status(400).send(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>AS - X OAuth Authorization Failed</title>
+          <style>
+            body { font-family: sans-serif; background: #070a13; color: #fff; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+            .card { background: #0f1624; border: 1px solid #ef4444; padding: 28px; border-radius: 16px; text-align: center; max-width: 440px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+            h2 { color: #ef4444; margin-top: 0; }
+            p { color: #94a3b8; font-size: 14px; line-height: 1.5; }
+            .btn { background: #334155; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; margin-top: 16px; font-weight: bold; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <h2>✕ X Authorization Denied</h2>
+            <p>${safeError}</p>
+            <button class="btn" onclick="window.close()">Close Window</button>
+          </div>
+          <script>
             if (window.opener) {
-              window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS', service: 'x' }, '*');
-              setTimeout(() => { window.close(); }, 800);
-            } else {
-              window.location.href = '/';
+              window.opener.postMessage({ type: 'OAUTH_AUTH_ERROR', service: 'x', error: ${JSON.stringify(safeError)} }, '*');
             }
-          } catch (e) {
-            window.close();
-          }
-        </script>
-      </body>
-    </html>
-  `);
+          </script>
+        </body>
+      </html>
+    `);
+  }
+
+  if (!code) {
+    return res.status(400).send('Authorization code missing.');
+  }
+
+  try {
+    // Read session to get stored codeVerifier
+    const dataDir = path.resolve(process.cwd(), 'data');
+    const oauthFile = path.join(dataDir, 'connected_accounts.json');
+    let session: any = {};
+    if (fs.existsSync(oauthFile)) {
+      try { session = JSON.parse(fs.readFileSync(oauthFile, 'utf-8')); } catch (_) {}
+    }
+
+    const { getSettings } = await import('./server/storage.js');
+    const settings = getSettings();
+    const clientId = settings.xConfig.apiKey || process.env.X_CLIENT_ID || 'M29sSkh5dkhuOU1qS3c4bU8yV1E6MTpjaQ';
+    const clientSecret = settings.xConfig.apiSecret || process.env.X_CLIENT_SECRET;
+    const appUrl = process.env.APP_URL || 'https://ais-dev-lmom2hd2oucw6cxokozf4z-886470196514.asia-southeast1.run.app';
+    const redirectUri = `${appUrl}/auth/callback`;
+
+    // Exchange authorization code for User Access Token with X API v2
+    const tokenParams = new URLSearchParams({
+      code: String(code),
+      grant_type: 'authorization_code',
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      code_verifier: session.codeVerifier || '',
+    });
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    };
+    if (clientSecret) {
+      headers['Authorization'] = `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`;
+    }
+
+    const tokenResp = await fetch('https://api.twitter.com/2/oauth2/token', {
+      method: 'POST',
+      headers,
+      body: tokenParams.toString(),
+    });
+
+    const tokenData = await tokenResp.json();
+
+    if (!tokenResp.ok || tokenData.error) {
+      const errMsg = tokenData.error_description || tokenData.error || 'Token exchange failed with Twitter API';
+      const safeErrMsg = String(errMsg).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      return res.status(400).send(`
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>AS - X Token Exchange Failed</title>
+            <style>
+              body { font-family: sans-serif; background: #070a13; color: #fff; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+              .card { background: #0f1624; border: 1px solid #ef4444; padding: 28px; border-radius: 16px; text-align: center; max-width: 440px; }
+              h2 { color: #ef4444; margin-top: 0; }
+              p { color: #94a3b8; font-size: 14px; }
+            </style>
+          </head>
+          <body>
+            <div class="card">
+              <h2>✕ Token Exchange Failed</h2>
+              <p>${safeErrMsg}</p>
+              <button onclick="window.close()" style="background:#334155;color:#fff;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;">Close</button>
+            </div>
+            <script>
+              if (window.opener) {
+                window.opener.postMessage({ type: 'OAUTH_AUTH_ERROR', service: 'x', error: ${JSON.stringify(safeErrMsg)} }, '*');
+              }
+            </script>
+          </body>
+        </html>
+      `);
+    }
+
+    // Retrieve the authenticated user's real profile
+    let username = 'AuthenticatedUser';
+    let name = 'X Connected Account';
+    let profileImageUrl = '';
+    let followersCount = 0;
+    let followingCount = 0;
+    let userId = '';
+
+    try {
+      const userResp = await fetch('https://api.twitter.com/2/users/me?user.fields=profile_image_url,description,public_metrics,verified', {
+        headers: { Authorization: `Bearer ${tokenData.access_token}` },
+      });
+      if (userResp.ok) {
+        const userData = await userResp.json();
+        if (userData.data) {
+          userId = userData.data.id;
+          username = userData.data.username;
+          name = userData.data.name;
+          profileImageUrl = userData.data.profile_image_url || '';
+          followersCount = userData.data.public_metrics?.followers_count || 0;
+          followingCount = userData.data.public_metrics?.following_count || 0;
+        }
+      }
+    } catch (uErr) {
+      console.warn('Could not fetch user profile details:', uErr);
+    }
+
+    // Persist real verified session
+    const verifiedSession = {
+      isConnected: true,
+      id: userId,
+      username,
+      name,
+      profileImageUrl,
+      followersCount,
+      followingCount,
+      accessToken: tokenData.access_token,
+      refreshToken: tokenData.refresh_token,
+      tokenExpiresAt: Date.now() + (tokenData.expires_in || 7200) * 1000,
+      connectedAt: new Date().toISOString(),
+    };
+
+    if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+    fs.writeFileSync(oauthFile, JSON.stringify(verifiedSession, null, 2), 'utf-8');
+
+    const safeUsername = String(username).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>AS - X OAuth Success</title>
+          <style>
+            body { font-family: sans-serif; background: #070a13; color: #fff; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+            .card { background: #0f1624; border: 1px solid #10b981; padding: 28px; border-radius: 16px; text-align: center; max-width: 440px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+            h2 { color: #10b981; margin-top: 0; }
+            p { color: #94a3b8; font-size: 14px; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <h2>✓ X Account Connected</h2>
+            <p>Authenticated as <strong>@${safeUsername}</strong>.</p>
+            <p>Syncing verified sources to AS Studio...</p>
+          </div>
+          <script>
+            try {
+              if (window.opener) {
+                window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS', service: 'x', username: ${JSON.stringify(safeUsername)} }, '*');
+                setTimeout(() => { window.close(); }, 1000);
+              } else {
+                window.location.href = '/';
+              }
+            } catch (e) {
+              window.close();
+            }
+          </script>
+        </body>
+      </html>
+    `);
+  } catch (e: any) {
+    const safeError = String(e.message || 'Unknown server error').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    res.status(500).send(`Server OAuth error: ${safeError}`);
+  }
+});
+
+// Meta Facebook OAuth Callback Handler
+app.get(['/auth/facebook/callback', '/auth/facebook/callback/'], async (req, res) => {
+  const { code, error, error_description } = req.query;
+
+  if (error) {
+    const safeError = String(error_description || error).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return res.status(400).send(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>AS - Facebook OAuth Failed</title>
+          <style>
+            body { font-family: sans-serif; background: #070a13; color: #fff; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+            .card { background: #0f1624; border: 1px solid #ef4444; padding: 28px; border-radius: 16px; text-align: center; max-width: 440px; }
+            h2 { color: #ef4444; margin-top: 0; }
+            p { color: #94a3b8; font-size: 14px; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <h2>✕ Facebook Authorization Failed</h2>
+            <p>${safeError}</p>
+            <button onclick="window.close()" style="background:#334155;color:#fff;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;">Close</button>
+          </div>
+          <script>
+            if (window.opener) {
+              window.opener.postMessage({ type: 'OAUTH_AUTH_ERROR', service: 'facebook', error: ${JSON.stringify(safeError)} }, '*');
+            }
+          </script>
+        </body>
+      </html>
+    `);
+  }
+
+  if (!code) {
+    return res.status(400).send('Authorization code missing.');
+  }
+
+  try {
+    const { getSettings, saveSettings } = await import('./server/storage.js');
+    const settings = getSettings();
+    const appId = settings.metaConfig.appId || process.env.FACEBOOK_APP_ID;
+    const appSecret = settings.metaConfig.appSecret || process.env.FACEBOOK_APP_SECRET;
+    const appUrl = process.env.APP_URL || 'https://ais-dev-lmom2hd2oucw6cxokozf4z-886470196514.asia-southeast1.run.app';
+    const redirectUri = `${appUrl}/auth/facebook/callback`;
+
+    if (!appId || !appSecret) {
+      return res.status(400).send('Facebook App ID and App Secret must be configured in Settings.');
+    }
+
+    // Exchange code for User Access Token
+    const tokenUrl = `https://graph.facebook.com/v21.0/oauth/access_token?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&client_secret=${appSecret}&code=${encodeURIComponent(String(code))}`;
+    const tokenResp = await fetch(tokenUrl);
+    const tokenData = await tokenResp.json();
+
+    if (!tokenResp.ok || tokenData.error) {
+      const errMsg = tokenData.error?.message || 'Failed to exchange Meta authorization code';
+      const safeErrMsg = String(errMsg).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      return res.status(400).send(`Meta Error: ${safeErrMsg}`);
+    }
+
+    const userAccessToken = tokenData.access_token;
+
+    // Fetch user's real authorized Facebook Pages
+    const accountsUrl = `https://graph.facebook.com/v21.0/me/accounts?fields=id,name,category,access_token,tasks,fan_count&access_token=${userAccessToken}`;
+    const accountsResp = await fetch(accountsUrl);
+    const accountsData = await accountsResp.json();
+
+    const dataDir = path.resolve(process.cwd(), 'data');
+    if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+
+    const pages = accountsData.data || [];
+    fs.writeFileSync(path.join(dataDir, 'facebook_pages.json'), JSON.stringify(pages, null, 2), 'utf-8');
+
+    let selectedPageName = '';
+    if (pages.length > 0) {
+      // Auto-configure the first authorized page
+      const primaryPage = pages[0];
+      selectedPageName = primaryPage.name;
+      saveSettings({
+        metaConfig: {
+          ...settings.metaConfig,
+          isConfigured: true,
+          pageId: primaryPage.id,
+          pageName: primaryPage.name,
+          pageAccessToken: primaryPage.access_token,
+          lastConnected: new Date().toISOString(),
+        },
+      });
+    }
+
+    const safePageName = String(selectedPageName || `${pages.length} Pages retrieved`).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>AS - Facebook Page Connected</title>
+          <style>
+            body { font-family: sans-serif; background: #070a13; color: #fff; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+            .card { background: #0f1624; border: 1px solid #10b981; padding: 28px; border-radius: 16px; text-align: center; max-width: 440px; }
+            h2 { color: #10b981; margin-top: 0; }
+            p { color: #94a3b8; font-size: 14px; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <h2>✓ Facebook Page Authorized</h2>
+            <p>Connected to <strong>${safePageName}</strong>.</p>
+            <p>Publishing permissions verified.</p>
+          </div>
+          <script>
+            try {
+              if (window.opener) {
+                window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS', service: 'facebook', pageName: ${JSON.stringify(safePageName)} }, '*');
+                setTimeout(() => { window.close(); }, 1000);
+              } else {
+                window.location.href = '/';
+              }
+            } catch (e) {
+              window.close();
+            }
+          </script>
+        </body>
+      </html>
+    `);
+  } catch (e: any) {
+    const safeError = String(e.message || 'Server error during Facebook authorization').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    res.status(500).send(`Server Facebook OAuth error: ${safeError}`);
+  }
 });
 
 import { cloudWorkerRouter } from './server/routes/cloudWorkerRoutes.js';

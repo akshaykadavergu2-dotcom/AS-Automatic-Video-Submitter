@@ -207,53 +207,6 @@ export async function executeCloudWorkerCycle(): Promise<{
       }
     }
 
-    // High quality simulation item when offline or waiting for live API events
-    if (newPostsCount === 0 && existingPosts.length < 25) {
-      const sampleItem = {
-        author: sources[0] || { handle: 'TelanganaCMO', name: 'CMO Telangana Official', sourceType: 'both' },
-        text: `తెలంగాణ పరిశ్రమల శాఖ తాజా ప్రకటన: హైదరాబాద్ నగర శివార్లలో గ్లోబల్ టెక్ & ఎలక్ట్రానిక్స్ హబ్ ఏర్పాటుకు రూ. 1200 కోట్ల నిధుల కేటాయింపు. వేలాది నిరుద్యోగులకు నూతన ఉద్యోగ అవకాశాలు.`,
-        mediaType: 'video' as const,
-        category: 'Telangana',
-        locationTag: 'Hyderabad' as const,
-        isBreaking: true,
-      };
-
-      const simId = `sim-cloud-${Date.now().toString().slice(-7)}`;
-      const hash = computePostHash(sampleItem.author.handle, sampleItem.text, simId);
-      const isDup = existingPosts.some((ep) => ep.contentHash === hash);
-
-      if (!isDup) {
-        const simulatedPost: CollectedXPost = {
-          id: `post-x-${Date.now()}`,
-          xPostId: simId,
-          authorHandle: sampleItem.author.handle,
-          authorName: sampleItem.author.name,
-          text: sampleItem.text,
-          createdAt: new Date().toISOString(),
-          detectedAt: new Date().toISOString(),
-          originalPostUrl: `https://x.com/${sampleItem.author.handle}/status/${simId}`,
-          category: sampleItem.category,
-          locationTag: sampleItem.locationTag,
-          isBreakingNews: sampleItem.isBreaking,
-          requiresHumanReview: false,
-          sourceType: sampleItem.author.sourceType as any,
-          hasMedia: true,
-          mediaType: sampleItem.mediaType,
-          mediaUrl: '/assets/sample_footage.mp4',
-          contentHash: hash,
-          rightsStatus: 'eligible',
-          rightsNote: 'Government Information Release - Editorial Use Approved',
-          sourceAttribution: `Source: Official X account of ${sampleItem.author.name} (@${sampleItem.author.handle})`,
-          status: 'collected',
-          retryCount: 0,
-        };
-
-        existingPosts.unshift(simulatedPost);
-        newlyIngested.push(simulatedPost);
-        newPostsCount++;
-      }
-    }
-
     saveCollectedPosts(existingPosts);
     saveMonitoredSources(sources);
 
@@ -338,11 +291,74 @@ export async function executeCloudWorkerCycle(): Promise<{
   return { newPostsCount, renderedVideosCount, publishedCount };
 }
 
+// Validate system readiness before starting automation (Priority 5)
+export function validateAutomationReadiness(): {
+  isReady: boolean;
+  errors: string[];
+  warnings: string[];
+} {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  // 1. Verify Gemini API key
+  if (!process.env.GEMINI_API_KEY) {
+    errors.push('GEMINI_API_KEY is not configured. Gemini 2.5 Flash is required for Telugu news scriptwriting.');
+  }
+
+  // 2. Verify Monitored Sources
+  const activeSources = getMonitoredSources().filter((s) => s.isActive && !s.isExcluded);
+  if (activeSources.length === 0) {
+    errors.push('No active monitored sources found. Please add at least one X account to monitor in Account Connections.');
+  }
+
+  // 3. Verify Facebook credentials if in Auto-Publish mode
+  const conf = getAutomationConfig();
+  if (conf.mode === 'auto_publish') {
+    const settings = getSettings();
+    if (!settings.metaConfig.pageAccessToken || !settings.metaConfig.pageId) {
+      errors.push('Auto-Publish mode is active but Facebook Page is not configured. Please connect a Facebook Page or switch to Manual Approval mode.');
+    }
+  }
+
+  // 4. Check X credentials (warning if using public endpoints)
+  const settings = getSettings();
+  const hasXToken = Boolean(settings.xConfig.bearerToken || process.env.X_BEARER_TOKEN);
+  let hasOAuth = false;
+  try {
+    const oauthFile = path.join(DATA_DIR, 'connected_accounts.json');
+    if (fs.existsSync(oauthFile)) {
+      const sess = JSON.parse(fs.readFileSync(oauthFile, 'utf-8'));
+      if (sess.isConnected && sess.accessToken) hasOAuth = true;
+    }
+  } catch (_) {}
+
+  if (!hasXToken && !hasOAuth) {
+    warnings.push('Neither X Bearer Token nor X OAuth connection is configured. Add credentials in Connections to poll live tweets.');
+  }
+
+  return {
+    isReady: errors.length === 0,
+    errors,
+    warnings,
+  };
+}
+
 // Start 24/7 Cloud Worker
 export async function startCloudWorker(): Promise<CloudWorkerState> {
   const currentState = getCloudWorkerState();
   if (currentState.status === 'RUNNING') {
     return currentState;
+  }
+
+  // Strict configuration validation (Priority 5)
+  const readiness = validateAutomationReadiness();
+  if (!readiness.isReady) {
+    const errorSummary = readiness.errors.join(' | ');
+    addAutomationLog('error', 'system', `Start rejected: ${errorSummary}`);
+    saveCloudWorkerState({
+      lastError: errorSummary,
+    });
+    throw new Error(errorSummary);
   }
 
   console.log('[CloudWorker] Activating 24/7 Cloud Background Worker...');

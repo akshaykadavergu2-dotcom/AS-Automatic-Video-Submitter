@@ -1,0 +1,27 @@
+{
+  "channelName": "AS – AUTOMATIC VIDEO SUBMITTER",
+  "channelNameTelugu": "ప్రజా సంకేతం ఆటోమేషన్ స్టూడియో",
+  "tagline": "Connect • Automate • Edit • Publish",
+  "primaryColor": "#06b6d4",
+  "accentColor": "#ec4899",
+  "tickerSpeed": 25,
+  "logoUrl": "/assets/praja_sanketam_logo.svg",
+  "landscapeFrameUrl": "/assets/frames/landscape_frame.svg",
+  "verticalFrameUrl": "/assets/frames/vertical_frame.svg",
+  "metaConfig": {
+    "isConfigured": false,
+    "appId": "",
+    "appSecret": "",
+    "pageId": "",
+    "pageName": "",
+    "pageAccessToken": ""
+  },
+  "xConfig": {
+    "isConfigured": false,
+    "apiKey": "",
+    "apiSecret": "",
+    "bearerToken": ""
+  },
+  "renderQuality": "1080p",
+  "fps": 30
+}

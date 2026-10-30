@@ -508,52 +508,77 @@ export async function syncFollowingAccounts(paginationToken?: string): Promise<{
 
   addAutomationLog('info', 'following_sync', 'Initiating 24-hour X Following List synchronization...');
 
+  // Check OAuth session token or Bearer token
+  let authToken = bearerToken;
+  let authUserId: string | null = null;
+
+  try {
+    if (fs.existsSync(OAUTH_FILE)) {
+      const sess = JSON.parse(fs.readFileSync(OAUTH_FILE, 'utf-8'));
+      if (sess.isConnected && sess.accessToken) {
+        authToken = sess.accessToken;
+        authUserId = sess.id || null;
+      }
+    }
+  } catch (_) {}
+
+  if (!authToken || authToken.trim() === '') {
+    addAutomationLog('warn', 'following_sync', 'Cannot sync following list: X account is not connected and Bearer token is missing.');
+    return {
+      syncedCount: 0,
+      newAccountsAdded: 0,
+      unfollowedDetected: 0,
+      nextToken: undefined,
+    };
+  }
+
   // If real bearer token or OAuth token is available, query official X API
   let liveAccounts: Array<{ id: string; username: string; name: string; description?: string }> = [];
   let nextTokenResult: string | undefined;
 
-  if (bearerToken && bearerToken.trim() !== '') {
-    try {
-      // Lookup me user ID or default user
+  try {
+    let myId = authUserId;
+    if (!myId) {
+      // Lookup me user ID
       const userMe = await fetch('https://api.twitter.com/2/users/me', {
-        headers: { Authorization: `Bearer ${bearerToken}` },
+        headers: { Authorization: `Bearer ${authToken}` },
       });
       if (userMe.ok) {
         const meData = await userMe.json();
-        const myId = meData.data?.id;
-        if (myId) {
-          const url: string = `https://api.twitter.com/2/users/${myId}/following?max_results=50&user.fields=description,verified,profile_image_url${
-            paginationToken ? `&pagination_token=${paginationToken}` : ''
-          }`;
-          const followingResp = await fetch(url, {
-            headers: { Authorization: `Bearer ${bearerToken}` },
-          });
-          if (followingResp.ok) {
-            const followingData = await followingResp.json();
-            liveAccounts = followingData.data || [];
-            nextTokenResult = followingData.meta?.next_token;
-            recordApiUsage('x_api', 1);
-          }
-        }
+        myId = meData.data?.id;
       }
-    } catch (err: any) {
-      console.warn('Official X following query error:', err.message);
     }
+
+    if (myId) {
+      const url: string = `https://api.twitter.com/2/users/${myId}/following?max_results=50&user.fields=description,verified,profile_image_url${
+        paginationToken ? `&pagination_token=${paginationToken}` : ''
+      }`;
+      const followingResp = await fetch(url, {
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      if (followingResp.ok) {
+        const followingData = await followingResp.json();
+        liveAccounts = followingData.data || [];
+        nextTokenResult = followingData.meta?.next_token;
+        recordApiUsage('x_api', 1);
+        addAutomationLog('info', 'following_sync', `Retrieved ${liveAccounts.length} real accounts from X Following endpoint.`);
+      } else {
+        const errJson = await followingResp.json().catch(() => ({}));
+        addAutomationLog('error', 'following_sync', `X API error: ${errJson.detail || errJson.title || 'Failed to fetch following'}`);
+      }
+    }
+  } catch (err: any) {
+    addAutomationLog('error', 'following_sync', `Official X following query error: ${err.message}`);
   }
 
-  // If live query did not return accounts (e.g. sandbox or token scope),
-  // simulate robust following list sync with verified regional news handles
   if (liveAccounts.length === 0) {
-    liveAccounts = [
-      { id: 'fol-101', username: 'TelanganaCMO', name: 'CMO Telangana Official' },
-      { id: 'fol-102', username: 'AndhraPradeshCM', name: 'CMO Andhra Pradesh' },
-      { id: 'fol-103', username: 'TelanganaDGP', name: 'Director General of Police Telangana' },
-      { id: 'fol-104', username: 'PIB_Hyderabad', name: 'Press Information Bureau Hyderabad' },
-      { id: 'fol-105', username: 'drharshavardhan', name: 'Dr Harshavardhan News' },
-      { id: 'fol-106', username: 'KTRTRS', name: 'K.T. Rama Rao Official' },
-      { id: 'fol-107', username: 'PawanKalyan', name: 'Pawan Kalyan Official' },
-      { id: 'fol-108', username: 'HYDTP', name: 'Hyderabad Traffic Police' },
-    ];
+    addAutomationLog('info', 'following_sync', 'No followed accounts found or token scopes insufficient.');
+    return {
+      syncedCount: 0,
+      newAccountsAdded: 0,
+      unfollowedDetected: 0,
+      nextToken: undefined,
+    };
   }
 
   let newAccountsAdded = 0;
