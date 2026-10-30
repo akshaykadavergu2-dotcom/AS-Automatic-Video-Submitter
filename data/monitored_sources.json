@@ -1,0 +1,112 @@
+[
+  {
+    "id": "src-1",
+    "handle": "TelanganaCMO",
+    "name": "CMO Telangana Official",
+    "category": "Telangana",
+    "isActive": true,
+    "postsCollectedCount": 14,
+    "addedAt": "2026-10-23T05:43:03.468Z",
+    "description": "Official account of Chief Minister Office, Telangana State."
+  },
+  {
+    "id": "src-2",
+    "handle": "AndhraPradeshCM",
+    "name": "CMO Andhra Pradesh",
+    "category": "Andhra Pradesh",
+    "isActive": true,
+    "postsCollectedCount": 11,
+    "addedAt": "2026-10-23T05:43:03.468Z",
+    "description": "Official account of Chief Minister Office, Andhra Pradesh."
+  },
+  {
+    "id": "src-3",
+    "handle": "GHMCOnline",
+    "name": "GHMC Hyderabad Urban Updates",
+    "category": "Local News",
+    "isActive": true,
+    "postsCollectedCount": 8,
+    "addedAt": "2026-10-25T05:43:03.468Z",
+    "description": "Greater Hyderabad Municipal Corporation civic alerts & infrastructure."
+  },
+  {
+    "id": "src-4",
+    "handle": "TelanganaDGP",
+    "name": "Director General of Police Telangana",
+    "category": "Telangana",
+    "isActive": true,
+    "postsCollectedCount": 6,
+    "addedAt": "2026-10-26T05:43:03.468Z",
+    "description": "Official safety, law and order, and public notices."
+  },
+  {
+    "id": "src-5",
+    "handle": "PIB_Hyderabad",
+    "name": "Press Information Bureau Hyderabad",
+    "category": "National",
+    "isActive": true,
+    "postsCollectedCount": 12,
+    "addedAt": "2026-10-24T05:43:03.468Z",
+    "description": "Government of India nodal media updates for Telangana & AP."
+  },
+  {
+    "id": "src-fol-1793339647900-862",
+    "handle": "drharshavardhan",
+    "name": "Dr Harshavardhan News",
+    "profileUrl": "https://x.com/drharshavardhan",
+    "category": "Politics",
+    "sourceType": "following",
+    "isActive": true,
+    "isExcluded": false,
+    "postsCollectedCount": 0,
+    "addedAt": "2026-10-30T05:54:07.900Z",
+    "followingSince": "2026-10-30T05:54:07.900Z",
+    "description": "Imported from connected X Following List.",
+    "isVerified": true
+  },
+  {
+    "id": "src-fol-1793339647900-714",
+    "handle": "KTRTRS",
+    "name": "K.T. Rama Rao Official",
+    "profileUrl": "https://x.com/KTRTRS",
+    "category": "Telangana",
+    "sourceType": "following",
+    "isActive": true,
+    "isExcluded": false,
+    "postsCollectedCount": 0,
+    "addedAt": "2026-10-30T05:54:07.900Z",
+    "followingSince": "2026-10-30T05:54:07.900Z",
+    "description": "Imported from connected X Following List.",
+    "isVerified": true
+  },
+  {
+    "id": "src-fol-1793339647900-793",
+    "handle": "PawanKalyan",
+    "name": "Pawan Kalyan Official",
+    "profileUrl": "https://x.com/PawanKalyan",
+    "category": "Andhra Pradesh",
+    "sourceType": "following",
+    "isActive": true,
+    "isExcluded": false,
+    "postsCollectedCount": 0,
+    "addedAt": "2026-10-30T05:54:07.900Z",
+    "followingSince": "2026-10-30T05:54:07.900Z",
+    "description": "Imported from connected X Following List.",
+    "isVerified": true
+  },
+  {
+    "id": "src-fol-1793339647900-99",
+    "handle": "HYDTP",
+    "name": "Hyderabad Traffic Police",
+    "profileUrl": "https://x.com/HYDTP",
+    "category": "Telangana",
+    "sourceType": "following",
+    "isActive": true,
+    "isExcluded": false,
+    "postsCollectedCount": 0,
+    "addedAt": "2026-10-30T05:54:07.900Z",
+    "followingSince": "2026-10-30T05:54:07.900Z",
+    "description": "Imported from connected X Following List.",
+    "isVerified": true
+  }
+]

@@ -1,0 +1,72 @@
+[
+  {
+    "id": "log-1793340216861-398",
+    "timestamp": "2026-10-30T06:03:36.861Z",
+    "level": "warn",
+    "stage": "system",
+    "message": "Cloud Background Worker STOPPED. All new monitoring and collection halted."
+  },
+  {
+    "id": "log-1793340215659-359",
+    "timestamp": "2026-10-30T06:03:35.659Z",
+    "level": "info",
+    "stage": "system",
+    "message": "Stop requested. Halting cloud worker and future schedules..."
+  },
+  {
+    "id": "log-1793340206011-280",
+    "timestamp": "2026-10-30T06:03:26.011Z",
+    "level": "success",
+    "stage": "system",
+    "message": "24/7 Cloud Worker RUNNING on server (PID: 1006). Monitoring active every 15 minutes."
+  },
+  {
+    "id": "log-1793340206008-595",
+    "timestamp": "2026-10-30T06:03:26.008Z",
+    "level": "info",
+    "stage": "gemini_ai",
+    "message": "Analyzing news from @TelanganaCMO: తెలంగాణ పరిశ్రమల శాఖ తాజా ప్రకటన: హైదరాబాద్ నగర శి..."
+  },
+  {
+    "id": "log-1793340206006-296",
+    "timestamp": "2026-10-30T06:03:26.006Z",
+    "level": "info",
+    "stage": "ingest",
+    "message": "[Cloud Worker] Ticking background cycle across 9 sources..."
+  },
+  {
+    "id": "log-1793340206004-481",
+    "timestamp": "2026-10-30T06:03:26.004Z",
+    "level": "info",
+    "stage": "system",
+    "message": "Activating 24/7 Cloud Background Worker on server..."
+  },
+  {
+    "id": "log-1793339647901-668",
+    "timestamp": "2026-10-30T05:54:07.901Z",
+    "level": "success",
+    "stage": "following_sync",
+    "message": "Following sync finished. Synced 8 accounts. New: +4, Unfollowed: 0."
+  },
+  {
+    "id": "log-1793339647900-300",
+    "timestamp": "2026-10-30T05:54:07.900Z",
+    "level": "info",
+    "stage": "following_sync",
+    "message": "Initiating 24-hour X Following List synchronization..."
+  },
+  {
+    "id": "log-1793338990819-173",
+    "timestamp": "2026-10-30T05:43:10.819Z",
+    "level": "success",
+    "stage": "ingest",
+    "message": "Polling completed. Discovered 1 new eligible posts."
+  },
+  {
+    "id": "log-1793338990819-682",
+    "timestamp": "2026-10-30T05:43:10.819Z",
+    "level": "info",
+    "stage": "ingest",
+    "message": "Starting polling cycle across 5 active sources..."
+  }
+]

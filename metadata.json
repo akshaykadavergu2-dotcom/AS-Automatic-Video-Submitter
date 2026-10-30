@@ -1,0 +1,8 @@
+{
+  "name": "Praja Sanketam AI News Studio",
+  "description": "Professional full-stack AI News Automation platform and Telugu news production studio for generating Telugu headlines, anchor scripts, video rendering, trend monitoring, and social broadcasting.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

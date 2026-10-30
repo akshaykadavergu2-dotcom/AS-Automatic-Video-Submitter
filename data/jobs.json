@@ -1,0 +1,22 @@
+[
+  {
+    "id": "job-1793338394082",
+    "createdAt": "2026-10-30T05:33:14.082Z",
+    "title": "తెలంగాణలో కొత్త పారిశ్రామిక పాలసీ",
+    "aspectRatio": "16:9",
+    "status": "processing",
+    "progress": 35,
+    "config": {
+      "headline": "తెలంగాణలో కొత్త పారిశ్రామిక పాలసీ",
+      "subline": "50 వేల ఉద్యోగాలే లక్ష్యం",
+      "tickerText": "ప్రజా సంకేతం 24x7 న్యూస్ అప్‌డేట్స్..",
+      "aspectRatio": "16:9",
+      "primaryColor": "#dc2626",
+      "fontSize": 32,
+      "showLogo": true,
+      "showDate": true,
+      "showTicker": true,
+      "frameStyle": "praja_classic"
+    }
+  }
+]

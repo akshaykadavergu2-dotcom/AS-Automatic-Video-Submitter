@@ -1,0 +1,16 @@
+{
+  "status": "STOPPED",
+  "lastRunAt": null,
+  "nextScheduledRunAt": null,
+  "workerStartedAt": "2026-10-30T06:03:26.004Z",
+  "workerPid": 1006,
+  "currentExecutingJob": null,
+  "metrics": {
+    "postsCollected": 3,
+    "eligibleVideos": 2,
+    "completedVideos": 1,
+    "facebookPublished": 1
+  },
+  "lastError": null,
+  "isCloudRunEnvironment": true
+}

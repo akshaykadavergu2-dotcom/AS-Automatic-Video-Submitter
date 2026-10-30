@@ -1,0 +1,9 @@
+{
+  "xApiRequestsToday": 48,
+  "xApiDailyLimit": 500,
+  "followingSyncRequestsToday": 3,
+  "geminiTokensUsedToday": 18450,
+  "metaGraphCallsToday": 6,
+  "rateLimitResetTime": "24h window (Rolling)",
+  "lastUpdated": "2026-10-30T05:54:07.899Z"
+}

@@ -1,0 +1,22 @@
+{
+  "isGlobalPaused": false,
+  "mode": "manual_approval",
+  "followingSyncIntervalHours": 24,
+  "pollIntervalMinutes": 15,
+  "generateLandscape169": true,
+  "generateVertical916": true,
+  "filterKeywords": [
+    "Telangana",
+    "Andhra",
+    "Hyderabad",
+    "Amaravati",
+    "Cabinet",
+    "Police",
+    "Rains"
+  ],
+  "autoPublishOnlyVerifiedGov": true,
+  "dailyPostBudgetLimit": 50,
+  "lastPolledAt": "2026-10-30T05:43:10.819Z",
+  "lastFollowingSyncAt": "2026-10-30T05:54:07.900Z",
+  "isPollingActive": true
+}
