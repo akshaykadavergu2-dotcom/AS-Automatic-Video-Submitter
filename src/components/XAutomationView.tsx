@@ -203,10 +203,14 @@ export const XAutomationView: React.FC<XAutomationViewProps> = ({
   const handleConnectXOAuth = async () => {
     try {
       const res = await api.getXAuthUrl();
+      if (!res.isConfigured || !res.url) {
+        alert(res.error || 'X Client ID (X_CLIENT_ID) is not configured in Netlify environment variables.');
+        return;
+      }
       const authWindow = window.open(
         res.url,
         'x_oauth_popup',
-        'width=600,height=720,menubar=no,toolbar=no'
+        'width=620,height=750,menubar=no,toolbar=no'
       );
       if (!authWindow) {
         alert('దయచేసి పాప్‌అప్‌లను అనుమతించండి (Please allow popups to connect X account).');

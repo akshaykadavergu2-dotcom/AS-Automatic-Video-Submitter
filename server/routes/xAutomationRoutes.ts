@@ -21,14 +21,16 @@ import {
   MonitoredSource,
   CollectedXPost,
 } from '../xAutomationService.js';
-import { getSettings } from '../storage.js';
+import { getSettings, getDataDir } from '../storage.js';
+import { getXOAuthConfig, generateOAuthState } from '../oauthHelper.js';
 
 export const xAutomationRouter = Router();
 
-const DATA_DIR = path.resolve(process.cwd(), 'data');
-const OAUTH_FILE = path.join(DATA_DIR, 'connected_accounts.json');
+function getOAuthFile(): string {
+  return path.join(getDataDir(), 'connected_accounts.json');
+}
 
-interface XOAuthSession {
+export interface XOAuthSession {
   isConnected: boolean;
   id?: string;
   username?: string;
@@ -43,10 +45,11 @@ interface XOAuthSession {
   codeVerifier?: string;
 }
 
-function getOAuthSession(): XOAuthSession {
+export function getOAuthSession(): XOAuthSession {
   try {
-    if (fs.existsSync(OAUTH_FILE)) {
-      return JSON.parse(fs.readFileSync(OAUTH_FILE, 'utf-8'));
+    const file = getOAuthFile();
+    if (fs.existsSync(file)) {
+      return JSON.parse(fs.readFileSync(file, 'utf-8'));
     }
   } catch (e) {
     // ignore
@@ -54,9 +57,13 @@ function getOAuthSession(): XOAuthSession {
   return { isConnected: false };
 }
 
-function saveOAuthSession(session: XOAuthSession): void {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(OAUTH_FILE, JSON.stringify(session, null, 2), 'utf-8');
+export function saveOAuthSession(session: XOAuthSession): void {
+  try {
+    const file = getOAuthFile();
+    fs.writeFileSync(file, JSON.stringify(session, null, 2), 'utf-8');
+  } catch (e) {
+    console.warn('[X Automation] Failed to save OAuth session:', e);
+  }
 }
 
 // Clean and extract handle from username or full URL
@@ -75,27 +82,41 @@ function extractHandle(input: string): string {
 
 xAutomationRouter.get('/auth/url', (req, res) => {
   try {
-    const settings = getSettings();
-    const appUrl =
-      process.env.APP_URL ||
-      'https://ais-dev-lmom2hd2oucw6cxokozf4z-886470196514.asia-southeast1.run.app';
-    const redirectUri = `${appUrl}/auth/callback`;
+    const xConfig = getXOAuthConfig(req);
+
+    if (!xConfig.isConfigured) {
+      return res.json({
+        success: false,
+        isConfigured: false,
+        url: null,
+        redirectUri: xConfig.redirectUri,
+        error: 'X Client ID (X_CLIENT_ID) is not configured in Netlify environment variables.',
+        missingConfig: ['X_CLIENT_ID'],
+        notice: 'X Client ID is missing. Add X_CLIENT_ID in your Netlify Site Configuration (Environment variables).',
+        instructions: `In X Developer Portal (developer.x.com), create an OAuth 2.0 App and set Redirect URL to: ${xConfig.redirectUri}`,
+      });
+    }
 
     const codeVerifier = crypto.randomBytes(32).toString('base64url');
     const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
-    const state = crypto.randomBytes(16).toString('hex');
+
+    // Cryptographically sign state with codeVerifier included
+    const state = generateOAuthState({
+      service: 'x',
+      codeVerifier,
+      timestamp: Date.now(),
+      origin: xConfig.appUrl,
+    });
 
     const currentSession = getOAuthSession();
     currentSession.codeVerifier = codeVerifier;
     saveOAuthSession(currentSession);
 
-    const clientId = settings.xConfig.apiKey || process.env.X_CLIENT_ID || 'M29sSkh5dkhuOU1qS3c4bU8yV1E6MTpjaQ';
-
     const params = new URLSearchParams({
       response_type: 'code',
-      client_id: clientId,
-      redirect_uri: redirectUri,
-      scope: 'tweet.read users.read follows.read offline.access',
+      client_id: xConfig.clientId,
+      redirect_uri: xConfig.redirectUri,
+      scope: xConfig.scopes,
       state,
       code_challenge: codeChallenge,
       code_challenge_method: 'S256',
@@ -104,12 +125,15 @@ xAutomationRouter.get('/auth/url', (req, res) => {
     const authUrl = `https://twitter.com/i/oauth2/authorize?${params.toString()}`;
 
     return res.json({
+      success: true,
+      isConfigured: true,
       url: authUrl,
-      redirectUri,
-      clientIdConfigured: Boolean(settings.xConfig.apiKey || process.env.X_CLIENT_ID),
+      redirectUri: xConfig.redirectUri,
+      clientIdMasked: xConfig.clientId.slice(0, 4) + '••••' + xConfig.clientId.slice(-4),
+      scopes: xConfig.scopes,
     });
   } catch (e: any) {
-    return res.status(500).json({ error: e.message });
+    return res.status(500).json({ success: false, error: e.message });
   }
 });
 

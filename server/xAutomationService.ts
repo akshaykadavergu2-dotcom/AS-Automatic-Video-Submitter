@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { generateTeluguNewsPackage } from './geminiService.js';
-import { getSettings, saveJob, VideoRenderJob } from './storage.js';
+import { getSettings, saveJob, VideoRenderJob, getDataDir } from './storage.js';
 import { processVideoRenderJob } from './videoRenderer.js';
 
 export interface MonitoredSource {
@@ -115,7 +115,7 @@ export interface AutomationLog {
   details?: any;
 }
 
-const DATA_DIR = path.resolve(process.cwd(), 'data');
+const DATA_DIR = getDataDir();
 const SOURCES_FILE = path.join(DATA_DIR, 'monitored_sources.json');
 const POSTS_FILE = path.join(DATA_DIR, 'source_posts.json');
 const CONFIG_FILE = path.join(DATA_DIR, 'automation_config.json');
@@ -124,7 +124,10 @@ const USAGE_FILE = path.join(DATA_DIR, 'api_usage.json');
 const OAUTH_FILE = path.join(DATA_DIR, 'connected_accounts.json');
 
 function ensureDataFiles() {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  try {
+    const dir = getDataDir();
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  } catch (_) {}
 }
 
 // Default initial monitored sources covering both manual and following accounts

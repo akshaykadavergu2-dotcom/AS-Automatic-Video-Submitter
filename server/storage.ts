@@ -80,14 +80,28 @@ export interface StudioSettings {
   fps: 30 | 60;
 }
 
-const DATA_DIR = path.resolve(process.cwd(), 'data');
+import os from 'os';
+
+export function getDataDir(): string {
+  const isNetlify = Boolean(process.env.NETLIFY || process.env.LAMBDA_TASK_ROOT || process.env.AWS_EXECUTION_ENV);
+  const dir = isNetlify ? path.join(os.tmpdir(), 'as_news_data') : path.resolve(process.cwd(), 'data');
+  try {
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  } catch (_) {}
+  return dir;
+}
+
+const DATA_DIR = getDataDir();
 const UPLOADS_DIR = path.resolve(process.cwd(), 'uploads');
 const RENDERS_DIR = path.resolve(process.cwd(), 'uploads/renders');
 
 function ensureDirectories() {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-  if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-  if (!fs.existsSync(RENDERS_DIR)) fs.mkdirSync(RENDERS_DIR, { recursive: true });
+  try {
+    const dir = getDataDir();
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+    if (!fs.existsSync(RENDERS_DIR)) fs.mkdirSync(RENDERS_DIR, { recursive: true });
+  } catch (_) {}
 }
 
 const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');

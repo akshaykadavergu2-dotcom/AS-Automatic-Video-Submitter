@@ -1,36 +1,77 @@
 import { Router } from 'express';
-import { getSettings, saveDraft, getDrafts } from '../storage.js';
+import fs from 'fs';
+import path from 'path';
+import { getSettings, saveSettings, getDataDir } from '../storage.js';
+import { getMetaOAuthConfig, generateOAuthState } from '../oauthHelper.js';
 
 export const facebookRouter = Router();
 
-// Check Meta Facebook Page Connection Status (Real Handshake with Meta Graph API)
+function getPagesFile(): string {
+  return path.join(getDataDir(), 'facebook_pages.json');
+}
+
+export interface StoredFacebookPage {
+  id: string;
+  name: string;
+  category: string;
+  access_token: string;
+  tasks?: string[];
+  fan_count?: number;
+  picture?: {
+    data?: {
+      url?: string;
+    };
+  };
+}
+
+export function readStoredPages(): StoredFacebookPage[] {
+  try {
+    const file = getPagesFile();
+    if (fs.existsSync(file)) {
+      return JSON.parse(fs.readFileSync(file, 'utf-8'));
+    }
+  } catch (e) {
+    console.warn('[Facebook] Failed to read stored pages:', e);
+  }
+  return [];
+}
+
+export function saveStoredPages(pages: StoredFacebookPage[]): void {
+  try {
+    const file = getPagesFile();
+    fs.writeFileSync(file, JSON.stringify(pages, null, 2), 'utf-8');
+  } catch (e) {
+    console.warn('[Facebook] Failed to save stored pages:', e);
+  }
+}
+
+// 1. Meta Facebook Page Connection Status (Real Handshake with Meta Graph API)
 facebookRouter.get('/status', async (req, res) => {
   try {
     const settings = getSettings();
-    const { isConfigured, pageId, pageName, pageAccessToken } = settings.metaConfig;
+    const { pageId, pageName, pageAccessToken } = settings.metaConfig;
 
     if (!pageAccessToken || !pageId) {
       return res.json({
         connected: false,
         isConfigured: false,
         status: 'NOT CONFIGURED',
-        pageId: pageId || null,
-        pageName: pageName || null,
+        pageId: null,
+        pageName: null,
         requiredPermissions: [
           'pages_manage_posts',
           'pages_read_engagement',
           'pages_show_list',
           'publish_video',
         ],
-        notice:
-          'Meta Facebook Page credentials are not configured. Go to Studio Settings to enter your Page ID and Page Access Token (from Meta for Developers / Graph API Explorer).',
+        notice: 'Facebook Page is not connected. Click "Connect Facebook" to authorize via Meta Login.',
       });
     }
 
     // Attempt real handshake with Meta Graph API
     try {
       const graphResp = await fetch(
-        `https://graph.facebook.com/v21.0/${pageId}?fields=id,name,fan_count,verification_status,category&access_token=${pageAccessToken}`
+        `https://graph.facebook.com/v21.0/${pageId}?fields=id,name,fan_count,verification_status,category,picture{url}&access_token=${pageAccessToken}`
       );
       if (graphResp.ok) {
         const pageData = await graphResp.json();
@@ -41,8 +82,9 @@ facebookRouter.get('/status', async (req, res) => {
           pageName: pageData.name,
           category: pageData.category,
           fanCount: pageData.fan_count,
+          pictureUrl: pageData.picture?.data?.url || null,
           status: 'TOKEN ACTIVE (VERIFIED)',
-          notice: `Successfully connected to Facebook Page: ${pageData.name}`,
+          notice: `Connected to Facebook Page: ${pageData.name}`,
         });
       } else {
         const errorData = await graphResp.json();
@@ -54,7 +96,7 @@ facebookRouter.get('/status', async (req, res) => {
           status: 'TOKEN INVALID / EXPIRED',
           error: errorData.error?.message || 'Meta Graph API token validation failed',
           code: errorData.error?.code,
-          notice: 'Meta Page Access Token rejected by Facebook. Please generate a fresh token.',
+          notice: 'Meta Page Access Token rejected by Facebook. Please click "Reconnect Facebook".',
         });
       }
     } catch (networkErr: any) {
@@ -62,6 +104,7 @@ facebookRouter.get('/status', async (req, res) => {
         connected: false,
         isConfigured: true,
         pageId,
+        pageName,
         status: 'NETWORK ERROR',
         error: networkErr.message,
         notice: 'Network connection to Meta Graph API failed.',
@@ -72,121 +115,151 @@ facebookRouter.get('/status', async (req, res) => {
   }
 });
 
-// Meta OAuth Authorization URL
+// 2. Meta OAuth Authorization URL Generator (One-Click Connect Facebook)
 facebookRouter.get('/auth/url', (req, res) => {
   try {
-    const settings = getSettings();
-    const appId = settings.metaConfig.appId || process.env.FACEBOOK_APP_ID;
-    const appUrl = process.env.APP_URL || 'https://ais-dev-lmom2hd2oucw6cxokozf4z-886470196514.asia-southeast1.run.app';
-    const redirectUri = `${appUrl}/auth/facebook/callback`;
+    const metaConfig = getMetaOAuthConfig(req);
 
-    if (!appId) {
+    if (!metaConfig.isConfigured) {
       return res.json({
+        success: false,
         isConfigured: false,
         url: null,
-        redirectUri,
-        notice: 'Meta App ID is not configured. You can either enter your App ID & App Secret in Settings, or directly enter your Page ID and Page Access Token below.',
+        redirectUri: metaConfig.redirectUri,
+        error: 'Meta App ID (META_APP_ID or FACEBOOK_APP_ID) is not configured in Netlify environment variables.',
+        missingConfig: ['META_APP_ID', 'META_APP_SECRET'],
+        notice: 'Meta App ID is missing. Add META_APP_ID and META_APP_SECRET to your Netlify Site Configuration (Environment variables).',
+        instructions: `In Meta Developer Portal (developers.facebook.com), set Valid OAuth Redirect URI to: ${metaConfig.redirectUri}`,
       });
     }
 
-    const state = Math.random().toString(36).substring(7);
-    const scope = 'pages_manage_posts,pages_read_engagement,pages_show_list,publish_video';
-    const authUrl = `https://www.facebook.com/v21.0/dialog/oauth?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}&state=${state}&response_type=code`;
-
-    return res.json({
-      isConfigured: true,
-      url: authUrl,
-      redirectUri,
+    // Generate cryptographically signed state token
+    const state = generateOAuthState({
+      service: 'facebook',
+      timestamp: Date.now(),
+      origin: metaConfig.appUrl,
     });
-  } catch (e: any) {
-    return res.status(500).json({ error: e.message });
-  }
-});
 
-// Verify & Connect Facebook Page Credentials directly (Real test with Meta Graph API)
-facebookRouter.post('/verify-page', async (req, res) => {
-  try {
-    const { pageId, pageAccessToken, pageName } = req.body;
-    if (!pageId || !pageAccessToken) {
-      return res.status(400).json({
-        success: false,
-        error: 'Both Page ID and Page Access Token are required.',
-      });
-    }
-
-    // Ping Meta Graph API directly
-    const verifyResp = await fetch(
-      `https://graph.facebook.com/v21.0/${pageId.trim()}?fields=id,name,category,fan_count,verification_status&access_token=${pageAccessToken.trim()}`
-    );
-    const verifyData = await verifyResp.json();
-
-    if (!verifyResp.ok || verifyData.error) {
-      return res.status(400).json({
-        success: false,
-        error: verifyData.error?.message || 'Meta Graph API token verification failed. Please verify Page ID and Token.',
-        details: verifyData.error,
-      });
-    }
-
-    // Token is valid! Persist to storage
-    const { saveSettings } = await import('../storage.js');
-    const settings = getSettings();
-    const updated = saveSettings({
-      metaConfig: {
-        ...settings.metaConfig,
-        isConfigured: true,
-        pageId: verifyData.id,
-        pageName: verifyData.name || pageName || 'Facebook Page',
-        pageAccessToken: pageAccessToken.trim(),
-        lastConnected: new Date().toISOString(),
-      },
-    });
+    const authUrl = `https://www.facebook.com/${metaConfig.graphVersion}/dialog/oauth?client_id=${encodeURIComponent(
+      metaConfig.appId
+    )}&redirect_uri=${encodeURIComponent(metaConfig.redirectUri)}&scope=${encodeURIComponent(
+      metaConfig.scopes
+    )}&state=${encodeURIComponent(state)}&response_type=code`;
 
     return res.json({
       success: true,
-      message: `Successfully connected to Facebook Page: ${verifyData.name}`,
-      page: {
-        id: verifyData.id,
-        name: verifyData.name,
-        category: verifyData.category,
-        fanCount: verifyData.fan_count,
-      },
-      settings: updated,
+      isConfigured: true,
+      url: authUrl,
+      redirectUri: metaConfig.redirectUri,
+      appIdMasked: metaConfig.appId.slice(0, 4) + '••••' + metaConfig.appId.slice(-4),
+      graphVersion: metaConfig.graphVersion,
     });
   } catch (e: any) {
     return res.status(500).json({ success: false, error: e.message });
   }
 });
 
-// Get authorized Facebook Pages list
+// 3. Get Authorized Facebook Pages (Never exposes raw tokens to client)
 facebookRouter.get('/pages', (req, res) => {
   try {
-    const fs = require('fs');
-    const path = require('path');
-    const pagesFile = path.resolve(process.cwd(), 'data/facebook_pages.json');
-    let pages = [];
-    if (fs.existsSync(pagesFile)) {
-      try { pages = JSON.parse(fs.readFileSync(pagesFile, 'utf-8')); } catch (_) {}
-    }
+    const storedPages = readStoredPages();
     const settings = getSettings();
-    if (pages.length === 0 && settings.metaConfig.pageId && settings.metaConfig.pageName) {
-      pages.push({
-        id: settings.metaConfig.pageId,
-        name: settings.metaConfig.pageName,
-        category: 'Media / News Publishing Page',
-        access_token: settings.metaConfig.pageAccessToken,
-      });
-    }
-    return res.json({ success: true, pages });
+    const activePageId = settings.metaConfig.pageId;
+
+    const sanitizedPages = storedPages.map((p) => {
+      const canPublish =
+        Array.isArray(p.tasks) &&
+        (p.tasks.includes('CREATE_CONTENT') ||
+          p.tasks.includes('MANAGE') ||
+          p.tasks.includes('PUBLISH') ||
+          p.tasks.length === 0);
+
+      return {
+        id: p.id,
+        name: p.name,
+        category: p.category || 'Facebook Page',
+        fanCount: p.fan_count || 0,
+        pictureUrl: p.picture?.data?.url || null,
+        tasks: p.tasks || [],
+        canPublish,
+        isSelected: p.id === activePageId,
+      };
+    });
+
+    return res.json({
+      success: true,
+      pages: sanitizedPages,
+      activePageId: activePageId || null,
+    });
   } catch (e: any) {
     return res.status(500).json({ error: e.message });
   }
 });
 
-// Disconnect Facebook Page
+// 4. Select and Connect a Facebook Page (No manual token copying)
+facebookRouter.post('/select-page', async (req, res) => {
+  try {
+    const { pageId } = req.body;
+    if (!pageId) {
+      return res.status(400).json({ success: false, error: 'pageId is required' });
+    }
+
+    const storedPages = readStoredPages();
+    const targetPage = storedPages.find((p) => p.id === pageId);
+
+    if (!targetPage || !targetPage.access_token) {
+      return res.status(404).json({
+        success: false,
+        error:
+          'Page credentials not found in authorized session. Please click "Connect Facebook" to authorize your account.',
+      });
+    }
+
+    // Verify token with Meta Graph API
+    const verifyResp = await fetch(
+      `https://graph.facebook.com/v21.0/${targetPage.id}?fields=id,name,category,fan_count,verification_status,picture{url}&access_token=${targetPage.access_token}`
+    );
+    const verifyData = await verifyResp.json();
+
+    if (!verifyResp.ok || verifyData.error) {
+      return res.status(400).json({
+        success: false,
+        error: verifyData.error?.message || 'Meta Graph API token verification failed.',
+      });
+    }
+
+    // Activate the page in settings
+    const settings = getSettings();
+    saveSettings({
+      metaConfig: {
+        ...settings.metaConfig,
+        isConfigured: true,
+        pageId: targetPage.id,
+        pageName: verifyData.name || targetPage.name,
+        pageAccessToken: targetPage.access_token,
+        lastConnected: new Date().toISOString(),
+      },
+    });
+
+    return res.json({
+      success: true,
+      message: `Successfully connected Facebook Page: ${verifyData.name || targetPage.name}`,
+      page: {
+        id: targetPage.id,
+        name: verifyData.name || targetPage.name,
+        category: verifyData.category || targetPage.category,
+        fanCount: verifyData.fan_count || targetPage.fan_count || 0,
+        pictureUrl: verifyData.picture?.data?.url || targetPage.picture?.data?.url || null,
+      },
+    });
+  } catch (e: any) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// 5. Disconnect Facebook Page
 facebookRouter.post('/disconnect', async (req, res) => {
   try {
-    const { saveSettings } = await import('../storage.js');
     const settings = getSettings();
     saveSettings({
       metaConfig: {
@@ -199,12 +272,10 @@ facebookRouter.post('/disconnect', async (req, res) => {
       },
     });
 
-    const fs = require('fs');
-    const path = require('path');
-    const pagesFile = path.resolve(process.cwd(), 'data/facebook_pages.json');
-    if (fs.existsSync(pagesFile)) {
-      try { fs.unlinkSync(pagesFile); } catch (_) {}
-    }
+    try {
+      const file = getPagesFile();
+      if (fs.existsSync(file)) fs.unlinkSync(file);
+    } catch (_) {}
 
     return res.json({ success: true, message: 'Facebook Page disconnected successfully.' });
   } catch (e: any) {
@@ -212,7 +283,7 @@ facebookRouter.post('/disconnect', async (req, res) => {
   }
 });
 
-// Publish directly to Facebook Page
+// 6. Publish directly to Facebook Page using backend-stored access token
 facebookRouter.post('/publish', async (req, res) => {
   try {
     const { draftId, message, videoUrl, scheduledTime } = req.body;
@@ -223,7 +294,7 @@ facebookRouter.post('/publish', async (req, res) => {
       return res.status(400).json({
         success: false,
         error:
-          'Meta Facebook Page integration is not configured. Real Page Access Token and Page ID are required to publish. Open Studio Settings > Facebook Publishing to configure.',
+          'Facebook Page is not connected. Please connect your Facebook account using the "Connect Facebook" button.',
       });
     }
 
@@ -231,13 +302,11 @@ facebookRouter.post('/publish', async (req, res) => {
       return res.status(400).json({ error: 'Publish message or video is required.' });
     }
 
-    // Check if scheduled publishing requested
     let scheduledUnixTime: number | undefined;
     if (scheduledTime) {
       const scheduleDate = new Date(scheduledTime);
       scheduledUnixTime = Math.floor(scheduleDate.getTime() / 1000);
       const nowUnix = Math.floor(Date.now() / 1000);
-      // Meta requires scheduled posts to be at least 10 minutes in the future and maximum 75 days
       if (scheduledUnixTime < nowUnix + 600) {
         return res.status(400).json({
           error: 'Scheduled time must be at least 10 minutes in the future according to Meta Graph API rules.',
@@ -245,7 +314,6 @@ facebookRouter.post('/publish', async (req, res) => {
       }
     }
 
-    // Call Meta Graph API
     let graphEndpoint = `https://graph.facebook.com/v21.0/${pageId}/feed`;
     const postPayload: Record<string, any> = {
       message,
@@ -257,13 +325,12 @@ facebookRouter.post('/publish', async (req, res) => {
       postPayload.scheduled_publish_time = scheduledUnixTime;
     }
 
-    // If video URL exists
     if (videoUrl) {
       graphEndpoint = `https://graph.facebook.com/v21.0/${pageId}/videos`;
       postPayload.description = message;
       postPayload.file_url = videoUrl.startsWith('http')
         ? videoUrl
-        : `${process.env.APP_URL || 'https://ais-dev-lmom2hd2oucw6cxokozf4z-886470196514.asia-southeast1.run.app'}${videoUrl}`;
+        : `${process.env.APP_URL || 'https://as-automatic-video-submitter.netlify.app'}${videoUrl}`;
     }
 
     const fbResp = await fetch(graphEndpoint, {
@@ -280,18 +347,6 @@ facebookRouter.post('/publish', async (req, res) => {
         error: fbData.error?.message || 'Meta Graph API returned an error',
         details: fbData.error,
       });
-    }
-
-    // Update draft status if draftId provided
-    if (draftId) {
-      const drafts = getDrafts();
-      const draft = drafts.find((d) => d.id === draftId);
-      if (draft) {
-        draft.status = scheduledUnixTime ? 'scheduled' : 'published';
-        draft.publishedUrl = `https://facebook.com/${fbData.id || pageId}`;
-        if (scheduledTime) draft.scheduledTime = scheduledTime;
-        saveDraft(draft);
-      }
     }
 
     return res.json({

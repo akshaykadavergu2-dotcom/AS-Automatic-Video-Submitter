@@ -111,31 +111,53 @@ export const api = {
     return res.json();
   },
 
-  async getFacebookAuthUrl(): Promise<{ isConfigured: boolean; url: string | null; redirectUri: string; notice?: string }> {
+  async getFacebookAuthUrl(): Promise<{
+    success: boolean;
+    isConfigured: boolean;
+    url: string | null;
+    redirectUri: string;
+    appIdMasked?: string;
+    notice?: string;
+    error?: string;
+    missingConfig?: string[];
+    instructions?: string;
+  }> {
     const res = await fetch('/api/facebook/auth/url');
-    if (!res.ok) throw new Error('Failed to get Facebook OAuth URL');
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `Failed to get Facebook OAuth URL (HTTP ${res.status})` }));
+      throw new Error(err.error || `HTTP ${res.status} error from Facebook OAuth endpoint`);
+    }
     return res.json();
   },
 
-  async getFacebookPages(): Promise<{ success: boolean; pages: any[] }> {
+  async getFacebookPages(): Promise<{
+    success: boolean;
+    pages: {
+      id: string;
+      name: string;
+      category: string;
+      fanCount: number;
+      pictureUrl?: string | null;
+      tasks?: string[];
+      canPublish: boolean;
+      isSelected: boolean;
+    }[];
+    activePageId?: string | null;
+  }> {
     const res = await fetch('/api/facebook/pages');
     if (!res.ok) throw new Error('Failed to get Facebook pages');
     return res.json();
   },
 
-  async verifyFacebookPage(params: {
-    pageId: string;
-    pageAccessToken: string;
-    pageName?: string;
-  }): Promise<{ success: boolean; message: string; page: any }> {
-    const res = await fetch('/api/facebook/verify-page', {
+  async selectFacebookPage(pageId: string): Promise<{ success: boolean; message: string; page: any }> {
+    const res = await fetch('/api/facebook/select-page', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
+      body: JSON.stringify({ pageId }),
     });
     const data = await res.json();
     if (!res.ok || !data.success) {
-      throw new Error(data.error || 'Failed to verify Facebook Page credentials with Meta Graph API');
+      throw new Error(data.error || 'Failed to select and connect Facebook Page');
     }
     return data;
   },
@@ -198,9 +220,23 @@ export const api = {
   },
 
   // X Automation & OAuth Endpoints
-  async getXAuthUrl(): Promise<{ url: string; redirectUri: string; clientIdConfigured: boolean }> {
+  async getXAuthUrl(): Promise<{
+    success: boolean;
+    isConfigured: boolean;
+    url: string | null;
+    redirectUri: string;
+    clientIdMasked?: string;
+    scopes?: string;
+    notice?: string;
+    error?: string;
+    missingConfig?: string[];
+    instructions?: string;
+  }> {
     const res = await fetch('/api/x-automation/auth/url');
-    if (!res.ok) throw new Error('Failed to generate X auth URL');
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `Failed to generate X auth URL (HTTP ${res.status})` }));
+      throw new Error(err.error || `HTTP ${res.status} error from X OAuth endpoint`);
+    }
     return res.json();
   },
 
