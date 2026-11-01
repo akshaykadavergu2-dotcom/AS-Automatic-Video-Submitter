@@ -201,21 +201,54 @@ export const XAutomationView: React.FC<XAutomationViewProps> = ({
 
   // Connect X OAuth Popup
   const handleConnectXOAuth = async () => {
+    // Open popup synchronously on user click to avoid browser popup blockers leaving a blank about:blank window
+    const authWindow = window.open(
+      'about:blank',
+      'x_oauth_popup',
+      'width=620,height=750,menubar=no,toolbar=no,status=no,resizable=yes,scrollbars=yes'
+    );
+
+    if (authWindow) {
+      try {
+        authWindow.document.write(`
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <title>Connecting to X (Twitter)...</title>
+              <style>
+                body { background: #070a13; color: #fff; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; }
+                .spinner { width: 36px; height: 36px; border: 3px solid #1e293b; border-top-color: #38bdf8; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 16px; }
+                @keyframes spin { to { transform: rotate(360deg); } }
+              </style>
+            </head>
+            <body>
+              <div style="text-align: center;">
+                <div class="spinner"></div>
+                <p style="color: #94a3b8; font-size: 14px; margin: 0;">Connecting to X (Twitter)...</p>
+                <p style="color: #64748b; font-size: 12px; margin-top: 8px;">Preparing secure OAuth 2.0 authorization...</p>
+              </div>
+            </body>
+          </html>
+        `);
+      } catch (_) {}
+    }
+
     try {
       const res = await api.getXAuthUrl();
       if (!res.isConfigured || !res.url) {
+        if (authWindow && !authWindow.closed) authWindow.close();
         alert(res.error || 'X Client ID (X_CLIENT_ID) is not configured in Netlify environment variables.');
         return;
       }
-      const authWindow = window.open(
-        res.url,
-        'x_oauth_popup',
-        'width=620,height=750,menubar=no,toolbar=no'
-      );
-      if (!authWindow) {
-        alert('దయచేసి పాప్‌అప్‌లను అనుమతించండి (Please allow popups to connect X account).');
+
+      if (authWindow && !authWindow.closed) {
+        authWindow.location.href = res.url;
+        authWindow.focus();
+      } else {
+        window.open(res.url, '_blank');
       }
     } catch (e: any) {
+      if (authWindow && !authWindow.closed) authWindow.close();
       alert(`OAuth URL generation failed: ${e.message}`);
     }
   };

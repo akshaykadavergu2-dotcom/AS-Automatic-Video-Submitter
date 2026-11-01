@@ -85,7 +85,9 @@ xAutomationRouter.get('/auth/url', (req, res) => {
       code_challenge_method: 'S256',
     });
 
-    const authUrl = `https://twitter.com/i/oauth2/authorize?${params.toString()}`;
+    // X/Twitter OAuth 2.0 strictly requires %20 for space in scopes, NOT + (which causes blank page)
+    const queryString = params.toString().replace(/\+/g, '%20');
+    const authUrl = `https://x.com/i/oauth2/authorize?${queryString}`;
 
     return res.json({
       success: true,
