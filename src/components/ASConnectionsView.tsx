@@ -196,12 +196,12 @@ export const ASConnectionsView: React.FC<ASConnectionsViewProps> = ({
       const res = await api.getXAuthUrl();
       if (!res.isConfigured || !res.url) {
         setDiagnosticInfo({
-          title: 'X OAuth 2.0 Credentials Missing in Netlify',
+          title: 'X OAuth 2.0 Client ID Required',
           message:
             res.error ||
-            'X_CLIENT_ID is not configured in Netlify Environment Variables. Official OAuth 2.0 requires an authorized Client ID.',
+            'X_CLIENT_ID is not configured in Netlify Environment Variables. If you recently added it to Netlify, trigger a new deploy (Clear cache and deploy site) so serverless functions can read it.',
           missingKeys: res.missingConfig || ['X_CLIENT_ID'],
-          redirectUri: res.redirectUri,
+          redirectUri: res.redirectUri || `${window.location.origin}/auth/callback`,
           portalName: 'X Developer Portal',
           portalUrl: 'https://developer.x.com/en/portal/dashboard',
         });
@@ -213,9 +213,9 @@ export const ASConnectionsView: React.FC<ASConnectionsViewProps> = ({
       }
     } catch (e: any) {
       setDiagnosticInfo({
-        title: 'X OAuth URL Generation Error',
-        message: e.message || 'Could not contact backend OAuth endpoint.',
-        missingKeys: ['X_CLIENT_ID'],
+        title: 'Backend Endpoint Notice',
+        message: `${e.message}. If you recently added X_CLIENT_ID to Netlify, remember to trigger a new deploy (Deploys > Trigger deploy > Clear cache and deploy site) so functions pick up the new variables.`,
+        missingKeys: ['X_CLIENT_ID', 'X_CLIENT_SECRET'],
         redirectUri: `${window.location.origin}/auth/callback`,
         portalName: 'X Developer Portal',
         portalUrl: 'https://developer.x.com/en/portal/dashboard',

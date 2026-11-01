@@ -1,10 +1,53 @@
 import crypto from 'crypto';
-import { getSettings } from './storage.js';
+import fs from 'fs';
+import path from 'path';
+import { getSettings, getDataDir } from './storage.js';
+
+export function cleanEnv(val?: string | null): string {
+  if (!val) return '';
+  return val.trim().replace(/^["']|["']$/g, '').trim();
+}
 
 const OAUTH_SECRET =
-  process.env.OAUTH_SECRET ||
-  process.env.SESSION_SECRET ||
+  cleanEnv(process.env.OAUTH_SECRET) ||
+  cleanEnv(process.env.SESSION_SECRET) ||
   'as-praja-sanketam-oauth-secret-key-v1';
+
+export interface XOAuthSession {
+  isConnected: boolean;
+  id?: string;
+  username?: string;
+  name?: string;
+  profileImageUrl?: string;
+  followersCount?: number;
+  followingCount?: number;
+  tokenExpiresAt?: number;
+  connectedAt?: string;
+  accessToken?: string;
+  refreshToken?: string;
+  codeVerifier?: string;
+}
+
+export function getOAuthSession(): XOAuthSession {
+  try {
+    const file = path.join(getDataDir(), 'connected_accounts.json');
+    if (fs.existsSync(file)) {
+      return JSON.parse(fs.readFileSync(file, 'utf-8'));
+    }
+  } catch (e) {
+    // ignore
+  }
+  return { isConnected: false };
+}
+
+export function saveOAuthSession(session: XOAuthSession): void {
+  try {
+    const file = path.join(getDataDir(), 'connected_accounts.json');
+    fs.writeFileSync(file, JSON.stringify(session, null, 2), 'utf-8');
+  } catch (e) {
+    console.warn('[X Automation] Failed to save OAuth session:', e);
+  }
+}
 
 export interface OAuthStatePayload {
   service: 'x' | 'facebook';
@@ -19,24 +62,29 @@ export interface OAuthStatePayload {
  * Prioritizes:
  * 1. process.env.APP_URL (Explicit override)
  * 2. process.env.URL (Netlify default production site URL, e.g. https://as-automatic-video-submitter.netlify.app)
- * 3. Request headers (x-forwarded-host / host + x-forwarded-proto / proto)
- * 4. Fallback production URL
+ * 3. process.env.DEPLOY_URL (Netlify deploy specific URL)
+ * 4. Request headers (x-forwarded-host / host + x-forwarded-proto / proto)
+ * 5. Fallback production URL
  */
 export function resolveAppUrl(req?: any): string {
-  if (process.env.APP_URL && process.env.APP_URL.trim() !== '') {
-    return process.env.APP_URL.trim().replace(/\/$/, '');
+  const envAppUrl = cleanEnv(process.env.APP_URL);
+  if (envAppUrl) {
+    return envAppUrl.replace(/\/$/, '');
   }
-  if (process.env.URL && process.env.URL.trim() !== '') {
-    return process.env.URL.trim().replace(/\/$/, '');
+  const netlifyUrl = cleanEnv(process.env.URL);
+  if (netlifyUrl) {
+    return netlifyUrl.replace(/\/$/, '');
   }
-  if (process.env.DEPLOY_URL && process.env.DEPLOY_URL.trim() !== '') {
-    return process.env.DEPLOY_URL.trim().replace(/\/$/, '');
+  const deployUrl = cleanEnv(process.env.DEPLOY_URL);
+  if (deployUrl) {
+    return deployUrl.replace(/\/$/, '');
   }
   if (req) {
-    const forwardedHost = req.headers?.['x-forwarded-host'] || (req.get ? req.get('x-forwarded-host') : undefined);
-    const host = forwardedHost || req.headers?.host || (req.get ? req.get('host') : undefined);
+    const headers = req.headers || {};
+    const forwardedHost = headers['x-forwarded-host'] || (req.get ? req.get('x-forwarded-host') : undefined);
+    const host = forwardedHost || headers['host'] || (req.get ? req.get('host') : undefined);
     if (host) {
-      const forwardedProto = req.headers?.['x-forwarded-proto'] || (req.get ? req.get('x-forwarded-proto') : undefined);
+      const forwardedProto = headers['x-forwarded-proto'] || (req.get ? req.get('x-forwarded-proto') : undefined);
       const proto = forwardedProto || (req.secure ? 'https' : 'http');
       return `${proto}://${host}`;
     }
@@ -45,9 +93,22 @@ export function resolveAppUrl(req?: any): string {
 }
 
 /**
+ * Generates RFC 7636 compliant PKCE code verifier (base64url) and S256 code challenge
+ */
+export function generatePKCE() {
+  const codeVerifier = crypto.randomBytes(32).toString('base64url');
+  const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
+  return {
+    codeVerifier,
+    codeChallenge,
+    codeChallengeMethod: 'S256' as const,
+  };
+}
+
+/**
  * Creates a signed, tamper-proof, stateless OAuth state token.
  * Contains code_verifier for PKCE, timestamp, origin and CSRF token.
- * This guarantees zero reliance on shared filesystem or sticky sessions across serverless Lambdas/Functions.
+ * Guarantees zero reliance on shared filesystem or sticky sessions across serverless Lambdas/Netlify Functions.
  */
 export function generateOAuthState(payload: Omit<OAuthStatePayload, 'csrfToken'>): string {
   const fullPayload: OAuthStatePayload = {
@@ -93,34 +154,44 @@ export function verifyAndDecodeOAuthState(stateStr: string): OAuthStatePayload |
  * Retrieves normalized X (Twitter) OAuth 2.0 configuration.
  */
 export function getXOAuthConfig(req?: any) {
-  const settings = getSettings();
+  let settingsConfig = { apiKey: '', apiSecret: '' };
+  try {
+    const s = getSettings();
+    if (s?.xConfig) settingsConfig = s.xConfig;
+  } catch (_) {}
+
   const clientId =
-    process.env.X_CLIENT_ID ||
-    process.env.TWITTER_CLIENT_ID ||
-    settings.xConfig?.apiKey ||
+    cleanEnv(process.env.X_CLIENT_ID) ||
+    cleanEnv(process.env.TWITTER_CLIENT_ID) ||
+    cleanEnv(settingsConfig.apiKey) ||
     '';
+
   const clientSecret =
-    process.env.X_CLIENT_SECRET ||
-    process.env.TWITTER_CLIENT_SECRET ||
-    settings.xConfig?.apiSecret ||
+    cleanEnv(process.env.X_CLIENT_SECRET) ||
+    cleanEnv(process.env.TWITTER_CLIENT_SECRET) ||
+    cleanEnv(settingsConfig.apiSecret) ||
     '';
+
   const appUrl = resolveAppUrl(req);
+
   const redirectUri =
-    process.env.X_REDIRECT_URI ||
-    process.env.TWITTER_REDIRECT_URI ||
+    cleanEnv(process.env.X_REDIRECT_URI) ||
+    cleanEnv(process.env.TWITTER_REDIRECT_URI) ||
     `${appUrl}/auth/callback`;
+
+  // Required scopes: users.read, tweet.read, follows.read, offline.access
   const scopes =
-    process.env.X_SCOPES ||
-    'tweet.read users.read follows.read offline.access';
+    cleanEnv(process.env.X_SCOPES) ||
+    'users.read tweet.read follows.read offline.access';
 
   return {
-    clientId: clientId.trim(),
-    clientSecret: clientSecret.trim(),
-    redirectUri: redirectUri.trim(),
-    scopes: scopes.trim(),
+    clientId,
+    clientSecret,
+    redirectUri,
+    scopes,
     appUrl,
-    isConfigured: Boolean(clientId.trim()),
-    isClientSecretConfigured: Boolean(clientSecret.trim()),
+    isConfigured: Boolean(clientId),
+    isClientSecretConfigured: Boolean(clientSecret),
   };
 }
 
@@ -128,37 +199,47 @@ export function getXOAuthConfig(req?: any) {
  * Retrieves normalized Meta Facebook OAuth configuration.
  */
 export function getMetaOAuthConfig(req?: any) {
-  const settings = getSettings();
+  let settingsConfig = { appId: '', appSecret: '' };
+  try {
+    const s = getSettings();
+    if (s?.metaConfig) settingsConfig = s.metaConfig;
+  } catch (_) {}
+
   const appId =
-    process.env.META_APP_ID ||
-    process.env.FACEBOOK_APP_ID ||
-    settings.metaConfig?.appId ||
+    cleanEnv(process.env.META_APP_ID) ||
+    cleanEnv(process.env.FACEBOOK_APP_ID) ||
+    cleanEnv(settingsConfig.appId) ||
     '';
+
   const appSecret =
-    process.env.META_APP_SECRET ||
-    process.env.FACEBOOK_APP_SECRET ||
-    settings.metaConfig?.appSecret ||
+    cleanEnv(process.env.META_APP_SECRET) ||
+    cleanEnv(process.env.FACEBOOK_APP_SECRET) ||
+    cleanEnv(settingsConfig.appSecret) ||
     '';
+
   const appUrl = resolveAppUrl(req);
+
   const redirectUri =
-    process.env.META_REDIRECT_URI ||
-    process.env.FACEBOOK_REDIRECT_URI ||
+    cleanEnv(process.env.META_REDIRECT_URI) ||
+    cleanEnv(process.env.FACEBOOK_REDIRECT_URI) ||
     `${appUrl}/auth/facebook/callback`;
+
   const graphVersion =
-    process.env.META_GRAPH_API_VERSION ||
+    cleanEnv(process.env.META_GRAPH_API_VERSION) ||
     'v21.0';
+
   const scopes =
-    process.env.META_SCOPES ||
+    cleanEnv(process.env.META_SCOPES) ||
     'pages_manage_posts,pages_read_engagement,pages_show_list,publish_video';
 
   return {
-    appId: appId.trim(),
-    appSecret: appSecret.trim(),
-    redirectUri: redirectUri.trim(),
-    graphVersion: graphVersion.trim(),
-    scopes: scopes.trim(),
+    appId,
+    appSecret,
+    redirectUri,
+    graphVersion,
+    scopes,
     appUrl,
-    isConfigured: Boolean(appId.trim()),
-    isSecretConfigured: Boolean(appSecret.trim()),
+    isConfigured: Boolean(appId),
+    isSecretConfigured: Boolean(appSecret),
   };
 }

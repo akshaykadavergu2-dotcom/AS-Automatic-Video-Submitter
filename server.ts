@@ -7,7 +7,21 @@ import { initCloudWorkerOnBoot } from './server/cloudWorkerService.js';
 
 dotenv.config();
 
-const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+let PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+let HOST = '0.0.0.0';
+
+const args = process.argv.slice(2);
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === '--port' && args[i + 1]) {
+    const parsed = parseInt(args[i + 1], 10);
+    if (!isNaN(parsed)) PORT = parsed;
+    i++;
+  } else if (args[i] === '--host' && args[i + 1]) {
+    HOST = args[i + 1];
+    i++;
+  }
+}
+
 const isProduction = process.env.NODE_ENV === 'production';
 
 async function startServer() {
@@ -36,8 +50,8 @@ async function startServer() {
   // Initialize 24/7 Cloud Background Worker on boot
   initCloudWorkerOnBoot();
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`[AS Studio] Server running on http://0.0.0.0:${PORT}`);
+  app.listen(PORT, HOST, () => {
+    console.log(`[AS Studio] Server running on http://${HOST}:${PORT}`);
   });
 }
 

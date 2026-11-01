@@ -6,19 +6,50 @@
   directory = "netlify/functions"
   node_bundler = "esbuild"
 
-# Proxy all /api/* requests to Netlify serverless function
+# =======================================================
+# X OAuth 2.0 PKCE Endpoints (Dedicated Serverless Functions)
+# =======================================================
+[[redirects]]
+  from = "/api/x-automation/auth/url"
+  to = "/.netlify/functions/x-auth-url"
+  status = 200
+
+[[redirects]]
+  from = "/api/x-automation/auth/status"
+  to = "/.netlify/functions/x-auth-status"
+  status = 200
+
+[[redirects]]
+  from = "/api/x-automation/auth/disconnect"
+  to = "/.netlify/functions/x-auth-disconnect"
+  status = 200
+
+[[redirects]]
+  from = "/auth/callback"
+  to = "/.netlify/functions/x-auth-callback"
+  status = 200
+
+[[redirects]]
+  from = "/auth/callback/"
+  to = "/.netlify/functions/x-auth-callback"
+  status = 200
+
+# =======================================================
+# Facebook / General API Endpoints
+# =======================================================
 [[redirects]]
   from = "/api/*"
-  to = "/.netlify/functions/api/api/:splat"
+  to = "/.netlify/functions/api"
   status = 200
 
-# Proxy OAuth callback routes
 [[redirects]]
-  from = "/auth/*"
-  to = "/.netlify/functions/api/auth/:splat"
+  from = "/auth/facebook/callback"
+  to = "/.netlify/functions/api"
   status = 200
 
-# SPA fallback for frontend router
+# =======================================================
+# Single Page Application Fallback
+# =======================================================
 [[redirects]]
   from = "/*"
   to = "/index.html"

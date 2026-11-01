@@ -21,50 +21,13 @@ import {
   MonitoredSource,
   CollectedXPost,
 } from '../xAutomationService.js';
-import { getSettings, getDataDir } from '../storage.js';
-import { getXOAuthConfig, generateOAuthState } from '../oauthHelper.js';
+import { getSettings } from '../storage.js';
+import { getXOAuthConfig, generateOAuthState, getOAuthSession, saveOAuthSession, type XOAuthSession } from '../oauthHelper.js';
+
+export type { XOAuthSession };
+export { getOAuthSession, saveOAuthSession };
 
 export const xAutomationRouter = Router();
-
-function getOAuthFile(): string {
-  return path.join(getDataDir(), 'connected_accounts.json');
-}
-
-export interface XOAuthSession {
-  isConnected: boolean;
-  id?: string;
-  username?: string;
-  name?: string;
-  profileImageUrl?: string;
-  followersCount?: number;
-  followingCount?: number;
-  tokenExpiresAt?: number;
-  connectedAt?: string;
-  accessToken?: string;
-  refreshToken?: string;
-  codeVerifier?: string;
-}
-
-export function getOAuthSession(): XOAuthSession {
-  try {
-    const file = getOAuthFile();
-    if (fs.existsSync(file)) {
-      return JSON.parse(fs.readFileSync(file, 'utf-8'));
-    }
-  } catch (e) {
-    // ignore
-  }
-  return { isConnected: false };
-}
-
-export function saveOAuthSession(session: XOAuthSession): void {
-  try {
-    const file = getOAuthFile();
-    fs.writeFileSync(file, JSON.stringify(session, null, 2), 'utf-8');
-  } catch (e) {
-    console.warn('[X Automation] Failed to save OAuth session:', e);
-  }
-}
 
 // Clean and extract handle from username or full URL
 function extractHandle(input: string): string {
