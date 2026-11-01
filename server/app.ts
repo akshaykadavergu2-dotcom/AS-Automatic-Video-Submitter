@@ -117,7 +117,7 @@ app.get(['/auth/callback', '/auth/callback/'], async (req, res) => {
       headers['Authorization'] = `Basic ${Buffer.from(`${xConfig.clientId}:${xConfig.clientSecret}`).toString('base64')}`;
     }
 
-    const tokenResp = await fetch('https://api.twitter.com/2/oauth2/token', {
+    const tokenResp = await fetch('https://api.x.com/2/oauth2/token', {
       method: 'POST',
       headers,
       body: tokenParams.toString(),

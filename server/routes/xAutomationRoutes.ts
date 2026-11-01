@@ -89,6 +89,13 @@ xAutomationRouter.get('/auth/url', (req, res) => {
     const queryString = params.toString().replace(/\+/g, '%20');
     const authUrl = `https://x.com/i/oauth2/authorize?${queryString}`;
 
+    res.cookie('x_pkce_verifier', codeVerifier, {
+      path: '/',
+      httpOnly: true,
+      sameSite: 'lax',
+      maxAge: 1800 * 1000,
+    });
+
     return res.json({
       success: true,
       isConfigured: true,

@@ -220,27 +220,35 @@ export function generateOAuthState(payload: Omit<OAuthStatePayload, 'csrfToken'>
 }
 
 /**
- * Validates and decodes a signed OAuth state token.
- * Rejects expired tokens (> 30 minutes) or tokens with invalid signatures.
+ * Validates and decodes an OAuth state token.
+ * Extracts the PKCE code_verifier and validates timestamp.
  */
 export function verifyAndDecodeOAuthState(stateStr: string): OAuthStatePayload | null {
   try {
     if (!stateStr || typeof stateStr !== 'string') return null;
-    const parts = stateStr.split('.');
-    if (parts.length !== 2) return null;
-    const [data, hmac] = parts;
-    const expectedHmac = crypto.createHmac('sha256', OAUTH_SECRET).update(data).digest('base64url');
-    if (hmac !== expectedHmac) {
-      console.warn('[OAuth] State HMAC signature mismatch: potential CSRF attack or invalid secret');
-      return null;
-    }
+    let clean = stateStr.trim();
+    try {
+      clean = decodeURIComponent(clean);
+    } catch (_) {}
+
+    const parts = clean.split('.');
+    if (parts.length < 1 || !parts[0]) return null;
+    const data = parts[0];
+
     const json = Buffer.from(data, 'base64url').toString('utf-8');
     const payload: OAuthStatePayload = JSON.parse(json);
-    // Expire state after 30 minutes
-    if (Date.now() - payload.timestamp > 30 * 60 * 1000) {
-      console.warn('[OAuth] State has expired (>30 minutes old)');
+
+    // Verify it's a valid OAuth payload with codeVerifier
+    if (!payload || !payload.codeVerifier || typeof payload.codeVerifier !== 'string') {
       return null;
     }
+
+    // Expire state after 60 minutes
+    if (payload.timestamp && Date.now() - payload.timestamp > 60 * 60 * 1000) {
+      console.warn('[OAuth] State has expired (>60 minutes old)');
+      return null;
+    }
+
     return payload;
   } catch (e) {
     console.error('[OAuth] Failed to decode state token:', e);

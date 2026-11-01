@@ -55,9 +55,14 @@ export const handler = async (event: any) => {
     const queryString = params.toString().replace(/\+/g, '%20');
     const authUrl = `https://x.com/i/oauth2/authorize?${queryString}`;
 
+    const resHeaders = {
+      ...headers,
+      'Set-Cookie': `x_pkce_verifier=${encodeURIComponent(codeVerifier)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=1800`,
+    };
+
     return {
       statusCode: 200,
-      headers,
+      headers: resHeaders,
       body: JSON.stringify({
         success: true,
         isConfigured: true,
