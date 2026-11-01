@@ -11,6 +11,7 @@ export function cleanEnv(val?: string | null): string {
 const OAUTH_SECRET =
   cleanEnv(process.env.OAUTH_SECRET) ||
   cleanEnv(process.env.SESSION_SECRET) ||
+  cleanEnv(process.env.X_CLIENT_SECRET) ||
   'as-praja-sanketam-oauth-secret-key-v1';
 
 export interface XOAuthSession {
@@ -28,11 +29,106 @@ export interface XOAuthSession {
   codeVerifier?: string;
 }
 
-export function getOAuthSession(): XOAuthSession {
+let inMemorySession: XOAuthSession | null = null;
+
+/**
+ * Creates a tamper-proof cryptographically signed token containing session info.
+ * This ensures the authenticated state can be persisted across stateless Netlify serverless Lambdas.
+ */
+export function encodeSessionToken(session: XOAuthSession): string {
+  const json = JSON.stringify(session);
+  const data = Buffer.from(json).toString('base64url');
+  const hmac = crypto.createHmac('sha256', OAUTH_SECRET).update(data).digest('base64url');
+  return `${data}.${hmac}`;
+}
+
+/**
+ * Decodes and verifies a signed session token.
+ */
+export function decodeSessionToken(token: string): XOAuthSession | null {
+  try {
+    if (!token || typeof token !== 'string') return null;
+    const parts = token.split('.');
+    if (parts.length !== 2) return null;
+    const [data, hmac] = parts;
+    const expectedHmac = crypto.createHmac('sha256', OAUTH_SECRET).update(data).digest('base64url');
+    if (hmac !== expectedHmac) return null;
+    const json = Buffer.from(data, 'base64url').toString('utf-8');
+    const session: XOAuthSession = JSON.parse(json);
+    if (session.tokenExpiresAt && Date.now() > session.tokenExpiresAt) {
+      return { ...session, isConnected: false };
+    }
+    return session;
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Extracts a session token from request headers or cookies across Express or Netlify event objects.
+ */
+export function extractSessionToken(reqOrEvent?: any): string | null {
+  if (!reqOrEvent) return null;
+
+  const headers = reqOrEvent.headers || {};
+  const headerToken =
+    headers['x-oauth-session'] ||
+    headers['X-OAuth-Session'] ||
+    (reqOrEvent.get ? reqOrEvent.get('x-oauth-session') : undefined);
+  if (headerToken && typeof headerToken === 'string') {
+    return headerToken.trim();
+  }
+
+  const cookieHeader =
+    headers['cookie'] ||
+    headers['Cookie'] ||
+    (reqOrEvent.get ? reqOrEvent.get('cookie') : undefined);
+  if (cookieHeader && typeof cookieHeader === 'string') {
+    const match = cookieHeader.match(/x_oauth_session=([^;]+)/);
+    if (match && match[1]) {
+      return decodeURIComponent(match[1]).trim();
+    }
+  }
+
+  if (reqOrEvent.cookies?.x_oauth_session) {
+    return String(reqOrEvent.cookies.x_oauth_session).trim();
+  }
+
+  return null;
+}
+
+export function getOAuthSession(reqOrEvent?: any): XOAuthSession {
+  // 1. Try extracting from request header or cookie
+  const token = extractSessionToken(reqOrEvent);
+  if (token) {
+    const decoded = decodeSessionToken(token);
+    if (decoded && decoded.isConnected && decoded.username) {
+      inMemorySession = decoded;
+      // Sync to disk if not exists on this container
+      try {
+        const file = path.join(getDataDir(), 'connected_accounts.json');
+        if (!fs.existsSync(file)) {
+          fs.writeFileSync(file, JSON.stringify(decoded, null, 2), 'utf-8');
+        }
+      } catch (_) {}
+      return decoded;
+    }
+  }
+
+  // 2. Try in-memory cached session
+  if (inMemorySession && inMemorySession.isConnected) {
+    return inMemorySession;
+  }
+
+  // 3. Fallback to reading from connected_accounts.json on disk
   try {
     const file = path.join(getDataDir(), 'connected_accounts.json');
     if (fs.existsSync(file)) {
-      return JSON.parse(fs.readFileSync(file, 'utf-8'));
+      const data = JSON.parse(fs.readFileSync(file, 'utf-8'));
+      if (data && typeof data === 'object') {
+        inMemorySession = data;
+        return data;
+      }
     }
   } catch (e) {
     // ignore
@@ -40,13 +136,15 @@ export function getOAuthSession(): XOAuthSession {
   return { isConnected: false };
 }
 
-export function saveOAuthSession(session: XOAuthSession): void {
+export function saveOAuthSession(session: XOAuthSession): string {
+  inMemorySession = session;
   try {
     const file = path.join(getDataDir(), 'connected_accounts.json');
     fs.writeFileSync(file, JSON.stringify(session, null, 2), 'utf-8');
   } catch (e) {
     console.warn('[X Automation] Failed to save OAuth session:', e);
   }
+  return encodeSessionToken(session);
 }
 
 export interface OAuthStatePayload {

@@ -104,7 +104,7 @@ xAutomationRouter.get('/auth/url', (req, res) => {
 
 // X OAuth Status
 xAutomationRouter.get('/auth/status', (req, res) => {
-  const session = getOAuthSession();
+  const session = getOAuthSession(req);
   const settings = getSettings();
   const clientIdConfigured = Boolean(
     settings.xConfig.apiKey || process.env.X_CLIENT_ID
@@ -118,6 +118,7 @@ xAutomationRouter.get('/auth/status', (req, res) => {
 
   return res.json({
     isConnected: isReallyConnected,
+    authenticated: isReallyConnected,
     isConfigured: clientIdConfigured || bearerTokenConfigured,
     status: isReallyConnected
       ? 'TOKEN ACTIVE (VERIFIED)'
@@ -137,7 +138,7 @@ xAutomationRouter.get('/auth/status', (req, res) => {
 
 // Real X Account Disconnect and Token Revocation
 xAutomationRouter.post('/auth/disconnect', (req, res) => {
-  const session = getOAuthSession();
+  const session = getOAuthSession(req);
   if (session.accessToken) {
     try {
       const settings = getSettings();
@@ -155,6 +156,7 @@ xAutomationRouter.post('/auth/disconnect', (req, res) => {
   }
 
   saveOAuthSession({ isConnected: false });
+  res.clearCookie('x_oauth_session');
   addAutomationLog('info', 'system', 'X/Twitter account disconnected and session cleared by user.');
   return res.json({ success: true, message: 'X account disconnected.' });
 });
@@ -284,7 +286,8 @@ xAutomationRouter.delete('/sources/:id', (req, res) => {
 xAutomationRouter.post('/following/sync', async (req, res) => {
   try {
     const { paginationToken } = req.body;
-    const result = await syncFollowingAccounts(paginationToken);
+    const session = getOAuthSession(req);
+    const result = await syncFollowingAccounts(paginationToken, session);
     return res.json({ success: true, ...result });
   } catch (e: any) {
     return res.status(500).json({ error: e.message });

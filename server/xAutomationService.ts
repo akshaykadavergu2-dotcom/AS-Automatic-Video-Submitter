@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import { generateTeluguNewsPackage } from './geminiService.js';
 import { getSettings, saveJob, VideoRenderJob, getDataDir } from './storage.js';
 import { processVideoRenderJob } from './videoRenderer.js';
+import { getOAuthSession, type XOAuthSession } from './oauthHelper.js';
 
 export interface MonitoredSource {
   id: string;
@@ -498,7 +499,7 @@ export function computePostHash(author: string, text: string, xPostId: string): 
 }
 
 // Sync Following List from Official X API (OAuth 2.0 /v2/users/:id/following)
-export async function syncFollowingAccounts(paginationToken?: string): Promise<{
+export async function syncFollowingAccounts(paginationToken?: string, providedSession?: XOAuthSession): Promise<{
   syncedCount: number;
   newAccountsAdded: number;
   unfollowedDetected: number;
@@ -512,18 +513,14 @@ export async function syncFollowingAccounts(paginationToken?: string): Promise<{
   addAutomationLog('info', 'following_sync', 'Initiating 24-hour X Following List synchronization...');
 
   // Check OAuth session token or Bearer token
+  const sess = providedSession || getOAuthSession();
   let authToken = bearerToken;
   let authUserId: string | null = null;
 
-  try {
-    if (fs.existsSync(OAUTH_FILE)) {
-      const sess = JSON.parse(fs.readFileSync(OAUTH_FILE, 'utf-8'));
-      if (sess.isConnected && sess.accessToken) {
-        authToken = sess.accessToken;
-        authUserId = sess.id || null;
-      }
-    }
-  } catch (_) {}
+  if (sess.isConnected && sess.accessToken) {
+    authToken = sess.accessToken;
+    authUserId = sess.id || null;
+  }
 
   if (!authToken || authToken.trim() === '') {
     addAutomationLog('warn', 'following_sync', 'Cannot sync following list: X account is not connected and Bearer token is missing.');

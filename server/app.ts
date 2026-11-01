@@ -233,9 +233,16 @@ app.get(['/auth/callback', '/auth/callback/'], async (req, res) => {
       tokenExpiresAt: Date.now() + (tokenData.expires_in || 7200) * 1000,
       connectedAt: new Date().toISOString(),
     };
-    saveOAuthSession(verifiedSession);
+    const sessionToken = saveOAuthSession(verifiedSession);
 
     const safeUsername = String(username).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+    res.cookie('x_oauth_session', sessionToken, {
+      path: '/',
+      httpOnly: true,
+      sameSite: 'lax',
+      maxAge: 30 * 24 * 60 * 60 * 1000,
+    });
 
     return res.send(`
       <!DOCTYPE html>
@@ -263,13 +270,16 @@ app.get(['/auth/callback', '/auth/callback/'], async (req, res) => {
                 window.opener.postMessage({
                   type: 'OAUTH_AUTH_SUCCESS',
                   service: 'x',
+                  sessionToken: ${JSON.stringify(sessionToken)},
                   username: ${JSON.stringify(safeUsername)},
                   name: ${JSON.stringify(name)},
-                  profileImageUrl: ${JSON.stringify(profileImageUrl)}
+                  profileImageUrl: ${JSON.stringify(profileImageUrl)},
+                  followersCount: ${followersCount},
+                  followingCount: ${followingCount}
                 }, '*');
                 setTimeout(() => { window.close(); }, 1200);
               } else {
-                window.location.href = '/';
+                window.location.href = '/?x_auth_token=' + encodeURIComponent(${JSON.stringify(sessionToken)}) + '&x_connected=1';
               }
             } catch (e) {
               window.close();

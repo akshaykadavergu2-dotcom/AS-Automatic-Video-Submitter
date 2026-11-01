@@ -1,4 +1,5 @@
-import { getXOAuthConfig, verifyAndDecodeOAuthState, saveOAuthSession } from '../../server/oauthHelper.js';
+import { getXOAuthConfig, verifyAndDecodeOAuthState, saveOAuthSession, type XOAuthSession } from '../../server/oauthHelper.js';
+import { getMonitoredSources, saveMonitoredSources, MonitoredSource, addAutomationLog } from '../../server/xAutomationService.js';
 
 export const handler = async (event: any) => {
   const query = event.queryStringParameters || {};
@@ -7,7 +8,7 @@ export const handler = async (event: any) => {
   const error = query.error;
   const errorDescription = query.error_description;
 
-  const htmlHeaders = {
+  const htmlHeaders: Record<string, string> = {
     'Content-Type': 'text/html; charset=utf-8',
   };
 
@@ -129,7 +130,7 @@ export const handler = async (event: any) => {
       };
     }
 
-    // Retrieve authenticated user's profile
+    // Retrieve authenticated user's real profile
     let username = 'AuthenticatedUser';
     let name = 'X Connected Account';
     let profileImageUrl = '';
@@ -156,8 +157,53 @@ export const handler = async (event: any) => {
       console.warn('[Netlify Function] Could not fetch user profile details:', uErr);
     }
 
-    // Save session in serverless persistent storage
-    saveOAuthSession({
+    // Automatically sync accounts the user follows via Twitter API v2
+    if (userId) {
+      try {
+        const followingResp = await fetch(
+          `https://api.twitter.com/2/users/${userId}/following?max_results=50&user.fields=profile_image_url,description,public_metrics,verified`,
+          { headers: { Authorization: `Bearer ${tokenData.access_token}` } }
+        );
+        if (followingResp.ok) {
+          const followingData = await followingResp.json();
+          const followedUsers = followingData.data || [];
+          const existingSources = getMonitoredSources();
+          let addedCount = 0;
+
+          for (const u of followedUsers) {
+            const exists = existingSources.find((s) => s.handle.toLowerCase() === u.username.toLowerCase());
+            if (!exists) {
+              const newSrc: MonitoredSource = {
+                id: `src-follow-${u.id}`,
+                handle: u.username,
+                name: u.name,
+                avatarUrl: u.profile_image_url,
+                profileUrl: `https://x.com/${u.username}`,
+                category: 'Telangana',
+                sourceType: 'following',
+                isActive: true,
+                isExcluded: false,
+                postsCollectedCount: 0,
+                addedAt: new Date().toISOString(),
+                description: u.description || `Followed by @${username}`,
+                isVerified: Boolean(u.verified),
+              };
+              existingSources.push(newSrc);
+              addedCount++;
+            }
+          }
+          if (addedCount > 0) {
+            saveMonitoredSources(existingSources);
+            addAutomationLog('info', 'following_sync', `Imported ${addedCount} followed accounts from authenticated X profile @${username}.`);
+          }
+        }
+      } catch (fErr) {
+        console.warn('[Netlify Function] Following sync error:', fErr);
+      }
+    }
+
+    // Save session in serverless persistent storage and generate cryptographically signed session token
+    const verifiedSession: XOAuthSession = {
       isConnected: true,
       id: userId,
       username,
@@ -169,9 +215,13 @@ export const handler = async (event: any) => {
       refreshToken: tokenData.refresh_token,
       tokenExpiresAt: Date.now() + (tokenData.expires_in || 7200) * 1000,
       connectedAt: new Date().toISOString(),
-    });
+    };
+    const sessionToken = saveOAuthSession(verifiedSession);
 
     const safeUsername = String(username).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+    // Attach Set-Cookie so subsequent Lambda invocations inherit the session automatically
+    htmlHeaders['Set-Cookie'] = `x_oauth_session=${encodeURIComponent(sessionToken)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`;
 
     return {
       statusCode: 200,
@@ -201,13 +251,16 @@ export const handler = async (event: any) => {
           window.opener.postMessage({
             type: 'OAUTH_AUTH_SUCCESS',
             service: 'x',
+            sessionToken: ${JSON.stringify(sessionToken)},
             username: ${JSON.stringify(safeUsername)},
             name: ${JSON.stringify(name)},
-            profileImageUrl: ${JSON.stringify(profileImageUrl)}
+            profileImageUrl: ${JSON.stringify(profileImageUrl)},
+            followersCount: ${followersCount},
+            followingCount: ${followingCount}
           }, '*');
           setTimeout(() => { window.close(); }, 1200);
         } else {
-          window.location.href = '/';
+          window.location.href = '/?x_auth_token=' + encodeURIComponent(${JSON.stringify(sessionToken)}) + '&x_connected=1';
         }
       } catch (e) {
         window.close();

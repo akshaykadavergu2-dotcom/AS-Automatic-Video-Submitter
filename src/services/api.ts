@@ -1,6 +1,37 @@
 import { NewsDraft, VideoRenderJob, TrendingTopic, StudioSettings, CloudWorkerState, AutomationLog } from '../types/news';
 
+function getAuthHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (typeof window !== 'undefined') {
+    const token = localStorage.getItem('as_x_session_token');
+    if (token) {
+      headers['X-OAuth-Session'] = token;
+    }
+  }
+  return headers;
+}
+
 export const api = {
+  // Session persistence helpers
+  saveLocalXSessionToken(token: string) {
+    if (typeof window !== 'undefined' && token) {
+      localStorage.setItem('as_x_session_token', token);
+    }
+  },
+
+  clearLocalXSessionToken() {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('as_x_session_token');
+    }
+  },
+
+  getLocalXSessionToken(): string | null {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('as_x_session_token');
+    }
+    return null;
+  },
+
   // News Generation & Drafts
   async generateNews(params: {
     rawNews: string;
@@ -242,6 +273,7 @@ export const api = {
 
   async getXAuthStatus(): Promise<{
     isConnected: boolean;
+    authenticated?: boolean;
     isConfigured: boolean;
     status: string;
     username: string | null;
@@ -251,15 +283,27 @@ export const api = {
     followingCount?: number | null;
     connectedAt: string | null;
     clientIdConfigured: boolean;
-    bearerTokenConfigured: boolean;
+    bearerTokenConfigured?: boolean;
   }> {
-    const res = await fetch('/api/x-automation/auth/status');
+    const res = await fetch('/api/x-automation/auth/status', {
+      headers: {
+        ...getAuthHeaders(),
+      },
+    });
     if (!res.ok) throw new Error('Failed to fetch X auth status');
     return res.json();
   },
 
   async disconnectXAuth(): Promise<{ success: boolean; message: string }> {
-    const res = await fetch('/api/x-automation/auth/disconnect', { method: 'POST' });
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('as_x_session_token');
+    }
+    const res = await fetch('/api/x-automation/auth/disconnect', {
+      method: 'POST',
+      headers: {
+        ...getAuthHeaders(),
+      },
+    });
     if (!res.ok) throw new Error('Failed to disconnect X account');
     return res.json();
   },
@@ -274,7 +318,11 @@ export const api = {
   },
 
   async getXSources(): Promise<{ sources: any[] }> {
-    const res = await fetch('/api/x-automation/sources');
+    const res = await fetch('/api/x-automation/sources', {
+      headers: {
+        ...getAuthHeaders(),
+      },
+    });
     if (!res.ok) throw new Error('Failed to fetch monitored X sources');
     return res.json();
   },
@@ -383,7 +431,10 @@ export const api = {
   async syncXFollowing(paginationToken?: string): Promise<any> {
     const res = await fetch('/api/x-automation/following/sync', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders(),
+      },
       body: JSON.stringify({ paginationToken }),
     });
     if (!res.ok) throw new Error('Failed to sync X Following accounts');

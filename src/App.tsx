@@ -136,6 +136,14 @@ export default function App() {
   }, [currentDraft]);
 
   useEffect(() => {
+    try {
+      const searchParams = new URLSearchParams(window.location.search);
+      const tokenFromUrl = searchParams.get('x_auth_token');
+      if (tokenFromUrl) {
+        api.saveLocalXSessionToken(tokenFromUrl);
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+    } catch (_) {}
     loadInitialData();
   }, []);
 

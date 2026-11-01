@@ -3,7 +3,7 @@ import { getOAuthSession, getXOAuthConfig } from '../../server/oauthHelper.js';
 export const handler = async (event: any) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, X-OAuth-Session, Authorization',
     'Access-Control-Allow-Methods': 'GET, OPTIONS',
     'Content-Type': 'application/json',
   };
@@ -13,7 +13,7 @@ export const handler = async (event: any) => {
   }
 
   try {
-    const session = getOAuthSession();
+    const session = getOAuthSession(event);
     const xConfig = getXOAuthConfig({ headers: event.headers });
 
     const isTokenExpired = session.tokenExpiresAt ? Date.now() > session.tokenExpiresAt : false;
@@ -24,6 +24,7 @@ export const handler = async (event: any) => {
       headers,
       body: JSON.stringify({
         isConnected: isReallyConnected,
+        authenticated: isReallyConnected,
         isConfigured: xConfig.isConfigured,
         status: isReallyConnected
           ? 'TOKEN ACTIVE (VERIFIED)'

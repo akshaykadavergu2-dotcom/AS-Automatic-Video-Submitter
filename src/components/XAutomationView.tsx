@@ -184,15 +184,27 @@ export const XAutomationView: React.FC<XAutomationViewProps> = ({
 
   // OAuth popup listener
   useEffect(() => {
-    const handleOAuthMessage = (event: MessageEvent) => {
-      const origin = event.origin;
-      if (!origin.endsWith('.run.app') && !origin.includes('localhost')) {
-        return;
-      }
-      if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
-        setActionNotice('X account successfully connected via OAuth!');
-        loadModuleData();
-        setTimeout(() => setActionNotice(null), 4000);
+    const handleOAuthMessage = async (event: MessageEvent) => {
+      if (event.data?.type === 'OAUTH_AUTH_SUCCESS' && event.data?.service === 'x') {
+        if (event.data.sessionToken) {
+          api.saveLocalXSessionToken(event.data.sessionToken);
+        }
+        try {
+          const check = await api.getXAuthStatus();
+          if (check.isConnected) {
+            setAuthStatus(check);
+            setActionNotice(`X ఖాతా @${check.username || event.data.username} విజయవంతంగా అనుసంధానించబడింది! (Connected)`);
+            try {
+              await api.syncXFollowing();
+            } catch (_) {}
+            loadModuleData();
+          } else {
+            setActionNotice('OAuth ప్రక్రియ పూర్తయింది, కానీ సర్వర్ కనెక్షన్ ధృవీకరణలో సమస్య ఏర్పడింది.');
+          }
+        } catch (e: any) {
+          setActionNotice(`ధృవీకరణ లోపం: ${e.message}`);
+        }
+        setTimeout(() => setActionNotice(null), 5000);
       }
     };
     window.addEventListener('message', handleOAuthMessage);
@@ -256,6 +268,7 @@ export const XAutomationView: React.FC<XAutomationViewProps> = ({
   const handleDisconnectX = async () => {
     if (confirm('X ఖాతాను డిస్‌కనెక్ట్ చేయాలా? (Disconnect X account?)')) {
       await api.disconnectXAuth();
+      api.clearLocalXSessionToken();
       loadModuleData();
     }
   };
@@ -883,17 +896,17 @@ export const XAutomationView: React.FC<XAutomationViewProps> = ({
                   <div className="flex items-center gap-1.5 mt-1">
                     <span
                       className={`w-2 h-2 rounded-full ${
-                        authStatus?.authenticated ? 'bg-emerald-400' : 'bg-red-400'
+                        authStatus?.isConnected || authStatus?.authenticated ? 'bg-emerald-400' : 'bg-red-400'
                       }`}
                     ></span>
                     <span className="text-xs font-bold text-white">
-                      {authStatus?.authenticated
+                      {authStatus?.isConnected || authStatus?.authenticated
                         ? `@${authStatus.username || 'PrajaSanketamNews'}`
                         : 'కనెక్ట్ కాలేదు (Disconnected)'}
                     </span>
                   </div>
                 </div>
-                {!authStatus?.authenticated ? (
+                {!(authStatus?.isConnected || authStatus?.authenticated) ? (
                   <button
                     onClick={handleConnectXOAuth}
                     className="text-[11px] font-bold text-red-400 hover:text-red-300 underline font-telugu cursor-pointer"

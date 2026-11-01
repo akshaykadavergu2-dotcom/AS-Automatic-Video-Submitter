@@ -66,7 +66,7 @@ export const ASConnectionsView: React.FC<ASConnectionsViewProps> = ({
     followingCount?: number | null;
     connectedAt: string | null;
     clientIdConfigured: boolean;
-    bearerTokenConfigured: boolean;
+    bearerTokenConfigured?: boolean;
   }>({
     isConnected: false,
     isConfigured: false,
@@ -161,16 +161,69 @@ export const ASConnectionsView: React.FC<ASConnectionsViewProps> = ({
   };
 
   useEffect(() => {
+    // Check if user returned from direct OAuth redirect
+    const searchParams = new URLSearchParams(window.location.search);
+    const tokenFromUrl = searchParams.get('x_auth_token');
+    if (tokenFromUrl) {
+      api.saveLocalXSessionToken(tokenFromUrl);
+      window.history.replaceState({}, document.title, window.location.pathname);
+      setNotificationMsg({
+        text: 'Successfully returned from X authorization! Verifying connection...',
+        type: 'success',
+      });
+      api.getXAuthStatus().then((check) => {
+        if (check.isConnected) {
+          setXAuthStatus(check);
+          setNotificationMsg({
+            text: `Successfully authenticated X account @${check.username}!`,
+            type: 'success',
+          });
+          onSyncFollowing().catch(() => {});
+        }
+      }).catch(() => {});
+    }
+
     refreshStatuses();
 
     // Listen for OAuth popup completion
-    const handleOAuthMessage = (event: MessageEvent) => {
+    const handleOAuthMessage = async (event: MessageEvent) => {
       if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
-        setNotificationMsg({
-          text: `Successfully authenticated ${event.data.service === 'x' ? 'X account' : 'Facebook Page'}!`,
-          type: 'success',
-        });
-        refreshStatuses();
+        if (event.data.service === 'x') {
+          if (event.data.sessionToken) {
+            api.saveLocalXSessionToken(event.data.sessionToken);
+          }
+          // Verify with backend before confirming success to ensure UI state matches real backend session
+          try {
+            const check = await api.getXAuthStatus();
+            if (check.isConnected) {
+              setXAuthStatus(check);
+              setNotificationMsg({
+                text: `Successfully authenticated X account @${check.username || event.data.username}!`,
+                type: 'success',
+              });
+              try {
+                await onSyncFollowing();
+              } catch (_) {}
+            } else {
+              setNotificationMsg({
+                text: 'X authorization completed, but backend session verification failed. Please check Netlify environment configuration.',
+                type: 'error',
+              });
+            }
+          } catch (e: any) {
+            setNotificationMsg({
+              text: `Backend verification error: ${e.message}`,
+              type: 'error',
+            });
+          }
+          refreshStatuses();
+        } else {
+          setNotificationMsg({
+            text: 'Successfully authenticated Facebook Page!',
+            type: 'success',
+          });
+          refreshStatuses();
+        }
       } else if (event.data?.type === 'FACEBOOK_OAUTH_PAGES_LOADED') {
         setNotificationMsg({
           text: `Retrieved ${event.data.pagesCount || 'manageable'} Facebook Pages! Please select your publishing Page below.`,
@@ -192,37 +245,12 @@ export const ASConnectionsView: React.FC<ASConnectionsViewProps> = ({
 
   // 1. One-Click Connect X via Official OAuth 2.0 PKCE
   const handleConnectX = async () => {
-    // Open popup synchronously on user click to avoid browser popup blockers leaving a blank about:blank window
+    // Open popup synchronously on user click to avoid browser popup blockers
     const popup = window.open(
       'about:blank',
       'x_oauth_popup',
       'width=620,height=750,menubar=no,toolbar=no,status=no,resizable=yes,scrollbars=yes'
     );
-
-    if (popup) {
-      try {
-        popup.document.write(`
-          <!DOCTYPE html>
-          <html>
-            <head>
-              <title>Connecting to X (Twitter)...</title>
-              <style>
-                body { background: #070a13; color: #fff; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; }
-                .spinner { width: 36px; height: 36px; border: 3px solid #1e293b; border-top-color: #38bdf8; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 16px; }
-                @keyframes spin { to { transform: rotate(360deg); } }
-              </style>
-            </head>
-            <body>
-              <div style="text-align: center;">
-                <div class="spinner"></div>
-                <p style="color: #94a3b8; font-size: 14px; margin: 0;">Connecting to X (Twitter)...</p>
-                <p style="color: #64748b; font-size: 12px; margin-top: 8px;">Preparing secure OAuth 2.0 authorization...</p>
-              </div>
-            </body>
-          </html>
-        `);
-      } catch (_) {}
-    }
 
     try {
       const res = await api.getXAuthUrl();
@@ -242,10 +270,11 @@ export const ASConnectionsView: React.FC<ASConnectionsViewProps> = ({
       }
 
       if (popup && !popup.closed) {
-        popup.location.href = res.url;
+        popup.location.replace(res.url);
         popup.focus();
       } else {
-        window.open(res.url, '_blank');
+        // Fallback: direct window redirect if popups are blocked by browser
+        window.location.href = res.url;
       }
     } catch (e: any) {
       if (popup && !popup.closed) popup.close();
@@ -265,6 +294,7 @@ export const ASConnectionsView: React.FC<ASConnectionsViewProps> = ({
     if (!confirm('Are you sure you want to disconnect your X account?')) return;
     try {
       await api.disconnectXAuth();
+      api.clearLocalXSessionToken();
       setNotificationMsg({ text: 'X account disconnected.', type: 'success' });
       await refreshStatuses();
     } catch (e: any) {
